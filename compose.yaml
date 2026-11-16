@@ -1,0 +1,53 @@
+name: crud-rest-apis
+
+services:
+  postgres:
+    image: postgres:18.7-trixie
+    restart: unless-stopped
+    container_name: postgres_db
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: crud_rest_apis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256 --data-checksums
+    secrets:
+      - postgres_password
+      - app_password
+    volumes:
+      # PostgreSQL 18+ uses a versioned PGDATA below this directory.
+      - postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    command:
+      - postgres
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - timezone=UTC
+      - -c
+      - max_connections=50
+    shm_size: 128mb
+    stop_grace_period: 60s
+    healthcheck:
+      # TCP is unavailable during first-run initialization. Authenticate as the app.
+      test: ["CMD-SHELL", "PGPASSWORD=$$(cat /run/secrets/app_password) psql -h 127.0.0.1 -U crud_app -d crud_rest_apis -v ON_ERROR_STOP=1 -Atqc 'SELECT 1' > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+
+secrets:
+  postgres_password:
+    file: ./.secrets/postgres_password
+  app_password:
+    file: ./.secrets/app/spring.datasource.password

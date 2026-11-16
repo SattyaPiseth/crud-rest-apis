@@ -1,0 +1,7 @@
+spring:
+  config:
+    # Run from the project root. Only import the application secret, not admin secrets.
+    import: "configtree:./.secrets/app/"
+  datasource:
+    url: "jdbc:postgresql://127.0.0.1:5432/crud_rest_apis?sslmode=disable&requireAuth=scram-sha-256&ApplicationName=crud-rest-apis"
+    username: crud_app

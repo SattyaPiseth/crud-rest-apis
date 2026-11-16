@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: crud-rest-apis
+  # Supply SPRING_DATASOURCE_URL/USERNAME/PASSWORD outside local development.
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: app
+        jdbc:
+          time_zone: UTC
+  sql:
+    init:
+      mode: never
+  datasource:
+    # Starting values for a small application; tune against measured workload.
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+      validation-timeout: 3000
+      max-lifetime: 1800000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
