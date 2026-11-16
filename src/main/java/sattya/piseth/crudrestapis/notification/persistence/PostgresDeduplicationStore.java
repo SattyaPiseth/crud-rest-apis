@@ -22,6 +22,7 @@ import java.util.UUID;
 @Transactional(propagation = Propagation.MANDATORY)
 public class PostgresDeduplicationStore implements DeduplicationStore {
     private static final String CONSUMER_PARAMETER = "consumer";
+    private static final String EVENT_PARAMETER = "event";
 
     private final EntityManager entityManager;
     private final AuditorAware<String> auditorAware;
@@ -57,7 +58,7 @@ public class PostgresDeduplicationStore implements DeduplicationStore {
                 VALUES (:id, :tenant, :producer, :consumer, :event, :hash, :notification,
                         0, :now, :now, :actor, :actor)
                 ON CONFLICT (tenant_id, producer_id, consumer_name, event_id) DO NOTHING
-                """).setParameter(CONSUMER_PARAMETER, consumer).setParameter("event", eventId);
+                """).setParameter(CONSUMER_PARAMETER, consumer).setParameter(EVENT_PARAMETER, eventId);
         if (bindInsert(insert, source, fingerprint, candidateId).executeUpdate() == 1) {
             return new Reservation(candidateId, true);
         }
@@ -65,7 +66,7 @@ public class PostgresDeduplicationStore implements DeduplicationStore {
                 SELECT request_hash, notification_id FROM app.processed_event
                 WHERE tenant_id = :tenant AND producer_id = :producer
                     AND consumer_name = :consumer AND event_id = :event
-                """).setParameter(CONSUMER_PARAMETER, consumer).setParameter("event", eventId);
+                """).setParameter(CONSUMER_PARAMETER, consumer).setParameter(EVENT_PARAMETER, eventId);
         return existingReservation(bindSource(existing, source), fingerprint);
     }
 
@@ -78,7 +79,7 @@ public class PostgresDeduplicationStore implements DeduplicationStore {
                     AND consumer_name = :consumer AND event_id = :event
                 """)
                 .setParameter("notification", notificationId)
-                .setParameter(CONSUMER_PARAMETER, consumer).setParameter("event", eventId)
+                .setParameter(CONSUMER_PARAMETER, consumer).setParameter(EVENT_PARAMETER, eventId)
                 .setParameter("now", now()).setParameter("actor", currentActor());
         if (bindSource(query, source).executeUpdate() != 1) {
             throw new IllegalStateException("Event reservation is missing");

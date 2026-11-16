@@ -40,3 +40,6 @@ out/
 .secrets/
 .env
 backups/
+
+# Local Codex IDE connection settings
+/.codex/config.toml
