@@ -1,25 +1,21 @@
-# PostgreSQL for crud-rest-apis
+# PostgreSQL setup and operations
 
-Verified against official sources on 2026-11-16 and Context7 documentation.
+[Documentation index](../README.md) · [Getting started](../getting-started.md)
 
-## Version and security baseline
+Run all PowerShell commands from the repository root unless a different shell is
+explicitly shown. This guide describes the checked-in configuration.
 
-PostgreSQL has no community LTS edition: each major receives five years of
-support. PostgreSQL **18.7** is the latest stable minor listed today; version 18
-is supported until 2030-11-14. Version 19 is still a release candidate.
-See the [official support policy](https://www.postgresql.org/support/versioning/).
+## Configured versions and access model
 
-The [security matrix](https://www.postgresql.org/support/security/) lists 18.7
-as the fix release for the November 2026 server advisories, including
-CVE-2026-120151 and CVE-2026-120154. Staying on the latest minor includes earlier
-fixes; it is not a guarantee against unknown vulnerabilities.
+[compose.yaml](../../compose.yaml) pins `postgres:18.7-trixie`.
+[build.gradle](../../build.gradle) declares Spring Boot 4.1.2 and lets its dependency
+management select the PostgreSQL driver. These are repository settings, not a
+claim that they are the newest or vulnerability-free versions. Review upstream
+support and security advisories when upgrading.
 
-Spring Boot 4.1.2's [dependency management](https://docs.spring.io/spring-boot/appendix/dependency-versions/coordinates.html)
-already selects pgJDBC **42.7.14**. Keep the unversioned PostgreSQL dependency.
-The [driver security advisories](https://jdbc.postgresql.org/security/) identify
-42.7.14 as fixing CVE-2026-107314 and CVE-2026-107315; it also includes the
-42.7.12 channel-binding fix. Review the complete resolved dependency graph and
-[Spring advisories](https://spring.io/security/) before production releases.
+The runtime login is `crud_app`; schema ownership belongs to the non-login role
+`crud_owner`. A separate migration login must be provisioned before migrations
+can run. The initialization script does not create that login.
 
 ## Start the database first (PowerShell)
 
@@ -48,7 +44,55 @@ therefore includes completion of database initialization. Persistent data uses a
 named volume mounted at `/var/lib/postgresql`, as required by the
 [PostgreSQL 18+ official image](https://hub.docker.com/_/postgres).
 
-## Start Spring Boot afterward
+## Apply migrations before starting the application
+
+The [initialization script](../../docker/postgres/init/10-app.sh) creates roles and
+the `app` schema, not application tables.
+
+### Local Compose database
+
+Run the [local migration helper](../../scripts/Migrate-LocalDatabase.ps1):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Migrate-LocalDatabase.ps1
+```
+
+It creates a temporary login using the admin secret already mounted in the local
+container, runs the existing Flyway task as `crud_owner`, and removes the login
+in its cleanup block. The generated password is not written to a file or printed.
+The runtime `crud_app` account remains restricted. Repeating the helper validates
+the existing migration history and applies only pending migrations.
+
+If the helper process is forcibly terminated, its cleanup may not run; an
+administrator should inspect and remove its unused `crud_migrate_...` login.
+
+### Other environments
+
+An administrator must provision a
+dedicated migration login with database connection permission and permission to
+`SET ROLE crud_owner`. Supply its credentials through your shell or secret manager:
+
+| Environment variable | Value |
+|---|---|
+| `MIGRATION_DB_URL` | JDBC URL of the target database |
+| `MIGRATION_DB_USERNAME` | Dedicated migration login |
+| `MIGRATION_DB_PASSWORD` | Migration login secret |
+
+The [migration entry point](../../src/main/java/sattya/piseth/crudrestapis/infrastructure/migration/DatabaseMigrator.java)
+sets `crud_owner` before applying [versioned migrations](../../src/main/resources/db/migration).
+Owner default privileges grant the runtime account access to the resulting tables.
+
+```powershell
+.\gradlew.bat migrateDatabase
+```
+
+V1 creates the six foundation tables; V2 adds two deduplication receipt tables.
+Flyway is disabled in the running application and Hibernate validates the schema.
+Do not give runtime credentials DDL privileges or enable `ddl-auto=update` to
+work around missing migrations. Add new migration versions rather than editing
+already-applied SQL files.
+
+## Start Spring Boot
 
 ```powershell
 ./gradlew.bat bootRun --args='--spring.profiles.active=local'
@@ -56,23 +100,22 @@ named volume mounted at `/var/lib/postgresql`, as required by the
 
 In IntelliJ, select the `local` profile and set the working directory to the
 project root. Spring's config tree imports only the application password directory.
-For the current context test against the local database:
+Notification foundation tests now use a disposable PostgreSQL container instead
+of this persistent local database. See [testing and verification](../development/testing.md)
+for test instructions. Run tests with Docker Desktop available:
 
 ```powershell
-$env:SPRING_PROFILES_ACTIVE = 'local'
 ./gradlew.bat test
-Remove-Item Env:SPRING_PROFILES_ACTIVE
 ```
 
-Use a dedicated ephemeral PostgreSQL database for CI tests once CRUD tests are
-added. Do not run destructive integration tests against persistent development data.
+Do not run destructive integration tests against persistent development data.
 
 ## Application and database practices
 
 - The runtime account has CRUD privileges through defaults for objects created
   by `crud_owner`; it cannot create tables, roles, databases, or bypass RLS.
-- Before adding entities, introduce versioned Flyway or Liquibase migrations.
-  Run migrations separately using a dedicated migration login permitted to
+- Versioned Flyway migrations are implemented. Run them separately using a
+  dedicated migration login permitted to
   `SET ROLE crud_owner`; create objects under that role in the `app` schema.
   Do not give the running application migration credentials. The initial script
   creates roles/schema only and is not a replacement for migrations.
@@ -83,7 +126,10 @@ added. Do not run destructive integration tests against persistent development d
   across all app replicas plus migrations and administration below the configured
   database limit of 50. Tune with measurements, not copied production numbers.
 - Runtime SQL timeout is 30 seconds, lock timeout 5 seconds, and idle transaction
-  timeout 60 seconds. Review these limits for longer workloads. UTC is configured.
+  timeout 60 seconds. Review these limits for longer workloads. The application
+  and database sessions use `Asia/Phnom_Penh` (UTC+07:00); `timestamptz` still
+  represents an absolute instant. See [auditing and timezones](../architecture/domain-model.md#auditing-and-timezones)
+  for JSON formatting.
 - Do not enable SQL parameter logging with sensitive production data. Monitor
   slow queries, pool saturation, disk space, locks and backup completion.
 

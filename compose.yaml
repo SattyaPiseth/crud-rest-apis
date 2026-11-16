@@ -25,7 +25,7 @@ services:
       - -c
       - password_encryption=scram-sha-256
       - -c
-      - timezone=UTC
+      - timezone=Asia/Phnom_Penh
       - -c
       - max_connections=50
     shm_size: 128mb

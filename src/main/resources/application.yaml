@@ -1,6 +1,9 @@
 spring:
   application:
     name: crud-rest-apis
+  flyway:
+    # Runtime credentials deliberately have no DDL permissions.
+    enabled: false
   # Supply SPRING_DATASOURCE_URL/USERNAME/PASSWORD outside local development.
   jpa:
     open-in-view: false
@@ -10,18 +13,23 @@ spring:
       hibernate:
         default_schema: app
         jdbc:
-          time_zone: UTC
+          time_zone: Asia/Phnom_Penh
   sql:
     init:
       mode: never
   datasource:
     # Starting values for a small application; tune against measured workload.
     hikari:
+      connection-init-sql: "SET TIME ZONE 'Asia/Phnom_Penh'"
       maximum-pool-size: 10
       minimum-idle: 2
       connection-timeout: 10000
       validation-timeout: 3000
       max-lifetime: 1800000
+
+logging:
+  pattern:
+    dateformat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX,Asia/Phnom_Penh"
 
 management:
   endpoints:
