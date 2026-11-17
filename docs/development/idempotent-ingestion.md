@@ -8,7 +8,8 @@ Spring-managed application code; they are not standalone programs or HTTP APIs.
 ## Scope
 
 Implemented: bounded in-app ingestion, transactional outbox creation, and a
-transport-independent consumer. No HTTP endpoint or Kafka listener is started.
+transport-independent consumer. The [REST adapter](rest-api.md) is opt-in; no
+Kafka listener is started.
 Email/push delivery and outbox publication remain later steps.
 
 Application types live in `notification/application`; the PostgreSQL adapter
@@ -52,8 +53,8 @@ var result = ingestionService.ingest(source, "order-123-shipped", command);
 
 HTTP callers require an authenticated audit actor. Trusted background callers
 wrap the entire call in `BackgroundActor.callAs(...)`. ProducerScope is a trusted
-application contract, not an authorization mechanism. HTTP is still deny-all
-until a properly authorized adapter is implemented.
+application contract, not an authorization mechanism. The REST adapter derives
+this context from validated JWT claims and requires the producer write scope.
 
 - Same key/equivalent command: original ID, `replayed=true`.
 - Same key/different command: `IdempotencyConflictException` (future HTTP 409).
@@ -66,6 +67,12 @@ until a properly authorized adapter is implemented.
 Fan-out is limited to 1000 input recipient IDs. The outbox payload contains
 notification ID, recipient count, and occurrence time. No external-channel
 delivery jobs are created in this step.
+
+Preferences are persistence-only in stage 1: ingestion does not query
+`NotificationPreference`. A disabled matching `IN_APP` preference still results
+in an inbox item. Filtering, defaults for missing preferences, and behavior when
+all recipients opt out must be defined before preference enforcement is added.
+Replay returns the original acceptance result; it does not reevaluate preferences.
 
 ## 3. Consume an event
 
@@ -102,6 +109,11 @@ Each public ingestion entry owns a fresh READ COMMITTED transaction with a
 acceptance boundary. It cannot see an outer transaction's uncommitted recipients,
 and an outer rollback cannot undo a notification it already accepted. Prefer
 nontransactional transport adapters.
+
+Nested transactional callers also hold their outer connection while ingestion
+acquires another. Size the pool for that usage or avoid nesting these acceptance
+calls. Integration tests cover outer rollback independence and the visibility of
+flushed but uncommitted recipients.
 
 ```text
 BEGIN

@@ -57,8 +57,8 @@ Run the [local migration helper](../../scripts/Migrate-LocalDatabase.ps1):
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Migrate-LocalDatabase.ps1
 ```
 
-It creates a temporary login using the admin secret already mounted in the local
-container, runs the existing Flyway task as `crud_owner`, and removes the login
+It creates a temporary `NOINHERIT` login using the admin secret already mounted in
+the local container, runs the existing Flyway task as `crud_owner`, and removes the login
 in its cleanup block. The generated password is not written to a file or printed.
 The runtime `crud_app` account remains restricted. Repeating the helper validates
 the existing migration history and applies only pending migrations.
@@ -68,9 +68,12 @@ administrator should inspect and remove its unused `crud_migrate_...` login.
 
 ### Other environments
 
-An administrator must provision a
-dedicated migration login with database connection permission and permission to
-`SET ROLE crud_owner`. Supply its credentials through your shell or secret manager:
+An administrator must provision a dedicated migration login with database
+connection permission and permission to `SET ROLE crud_owner`. Set it
+`NOINHERIT`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOREPLICATION`, and
+`NOBYPASSRLS`; its membership should permit explicit `SET ROLE` but not ambiently
+inherit the owner's DDL privileges. Supply credentials through your shell or
+secret manager:
 
 | Environment variable | Value |
 |---|---|
@@ -86,8 +89,10 @@ Owner default privileges grant the runtime account access to the resulting table
 .\gradlew.bat migrateDatabase
 ```
 
-V1 creates the six foundation tables; V2 adds two deduplication receipt tables.
-Flyway is disabled in the running application and Hibernate validates the schema.
+V1 creates the six foundation tables; V2 adds two deduplication receipt tables;
+V3 enables forced row-level security on every tenant-owned table. V4 revokes
+runtime access to `app.flyway_schema_history`. Flyway is disabled in the running
+application and Hibernate validates the schema.
 Do not give runtime credentials DDL privileges or enable `ddl-auto=update` to
 work around missing migrations. Add new migration versions rather than editing
 already-applied SQL files.
@@ -114,9 +119,18 @@ Do not run destructive integration tests against persistent development data.
 
 - The runtime account has CRUD privileges through defaults for objects created
   by `crud_owner`; it cannot create tables, roles, databases, or bypass RLS.
+  Migration V3 adds forced PostgreSQL row-level policies to all eight tenant
+  tables. Tenant-scoped application transactions set `app.tenant_id` transaction
+  locally through `TenantDatabaseContext`; absent context denies row access.
+  Never replace the local transaction setting with a persistent session setting,
+  which could leak across pooled connections. The setting is an application
+  defense-in-depth boundary, not proof against arbitrary SQL execution as
+  `crud_app`, since that role can set its own custom setting.
 - Versioned Flyway migrations are implemented. Run them separately using a
-  dedicated migration login permitted to
-  `SET ROLE crud_owner`; create objects under that role in the `app` schema.
+  dedicated `NOINHERIT` migration login permitted to `SET ROLE crud_owner`;
+  create objects under that role in the `app` schema. V4 removes the runtime
+  role's default CRUD grants on Flyway history; verify migration metadata remains
+  inaccessible to `crud_app`.
   Do not give the running application migration credentials. The initial script
   creates roles/schema only and is not a replacement for migrations.
 - Hibernate uses `ddl-auto=validate`, Open Session in View is disabled, and SQL
@@ -132,6 +146,31 @@ Do not run destructive integration tests against persistent development data.
   for JSON formatting.
 - Do not enable SQL parameter logging with sensitive production data. Monitor
   slow queries, pool saturation, disk space, locks and backup completion.
+
+### Rolling deployment and rollback for V3/V4
+
+V3 is intentionally fail-closed for old application versions that do not set the
+transaction-local tenant context. First deploy the context-aware application
+everywhere while RLS is still disabled, drain pre-context instances, and verify
+traffic. Then apply V3/V4 using the migration role in a controlled maintenance
+window: V3 changes policy state on all tenant tables and V4 restricts migration
+metadata. Confirm signed-token API traffic and the PostgreSQL RLS integration
+suite after migration. Do not reintroduce a pre-context application while V3 is
+active.
+
+To roll back to application code without context support, drain application
+traffic and have the schema owner execute an approved rollback that drops
+`app_tenant_isolation` from each tenant table and disables RLS. This is an
+operator-coordinated emergency action, not an automatic Flyway downgrade.
+Restore the context-aware application before re-enabling RLS. Keep a database
+backup and rehearse this sequence on a production-like copy before rollout.
+Do not restore runtime access to Flyway metadata during rollback. Recover failed
+migrations from a consistent database backup or repair the migration forward;
+do not manually delete Flyway history or edit applied migration files.
+
+RLS predicates add a transaction-scoped context query and are evaluated by
+PostgreSQL for tenant rows. No production workload benchmark is available here;
+measure query latency and plans before selecting production pool sizing.
 
 ## Production differences
 

@@ -20,6 +20,9 @@ spring:
   datasource:
     # Starting values for a small application; tune against measured workload.
     hikari:
+      data-source-properties:
+        # Suppress PostgreSQL row/parameter details in exceptions before application handling.
+        logServerErrorDetail: false
       connection-init-sql: "SET TIME ZONE 'Asia/Phnom_Penh'"
       maximum-pool-size: 10
       minimum-idle: 2
@@ -28,6 +31,12 @@ spring:
       max-lifetime: 1800000
 
 logging:
+  level:
+    # Provider exception logs bypass the sanitized API diagnostic boundary.
+    org.hibernate.orm.jdbc.error: OFF
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+    org.hibernate.orm.jdbc.bind: OFF
+    org.hibernate.SQL: OFF
   pattern:
     dateformat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX,Asia/Phnom_Penh"
 
@@ -39,3 +48,10 @@ management:
   endpoint:
     health:
       show-details: never
+      probes:
+        enabled: true
+
+# REST access remains closed until trusted JWT settings are supplied (see docs).
+app:
+  api:
+    enabled: false

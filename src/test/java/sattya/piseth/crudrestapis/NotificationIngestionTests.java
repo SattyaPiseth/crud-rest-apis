@@ -2,6 +2,13 @@ package sattya.piseth.crudrestapis;
 
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import sattya.piseth.crudrestapis.delivery.domain.Channel;
+import sattya.piseth.crudrestapis.preference.domain.NotificationPreference;
+import java.time.Clock;
+import java.time.ZoneId;
+import static org.mockito.Mockito.when;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,7 +42,8 @@ import static org.awaitility.Awaitility.await;
 @Testcontainers
 class NotificationIngestionTests {
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.7-trixie");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer("postgres:18.7-trixie").withInitScript("db/test-init.sql");
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) {
@@ -52,6 +60,90 @@ class NotificationIngestionTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper objectMapper;
     @Autowired DeduplicationStore deduplicationStore;
+    @MockitoBean(enforceOverride = true) Clock clock;
+
+    @BeforeEach
+    void resetClock() {
+        when(clock.instant()).thenReturn(Instant.parse("2030-01-01T00:00:00Z"));
+        when(clock.getZone()).thenReturn(ZoneId.of("Asia/Phnom_Penh"));
+    }
+
+    @Test
+    void disabledInAppPreferenceDoesNotSuppressStageOneInboxCreation() {
+        var source = source();
+        var id = recipient(source.tenantId());
+        actor.callAs("seed", () -> new TransactionTemplate(transactionManager).execute(status -> {
+            entityManager.persist(new NotificationPreference(entityManager.find(Recipient.class, id),
+                    "ORDERS", Channel.IN_APP, false));
+            return null;
+        }));
+        var command = command("Title", List.of(id));
+        var accepted = request(source, "preference", command);
+        assertThat(accepted.replayed()).isFalse();
+        assertThat(request(source, "preference", command))
+                .isEqualTo(new IngestionResult(accepted.notificationId(), true));
+        assertCounts(source, 1, 1, 1, 1, 0);
+    }
+
+    @Test
+    void acceptedIngestionSurvivesOuterTransactionRollback() {
+        var source = source();
+        var command = command("Title", List.of(recipient(source.tenantId())));
+        var outerRecipient = new Recipient(source.tenantId(), "https://identity.example", "rolled-back");
+        var accepted = actor.callAs("outer", () -> new TransactionTemplate(transactionManager).execute(status -> {
+            entityManager.persist(outerRecipient);
+            entityManager.flush();
+            var result = ingestion.ingest(source, "independent", command);
+            status.setRollbackOnly();
+            return result;
+        }));
+        assertThat(accepted).isNotNull();
+        assertThat(accepted.replayed()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM app.recipient WHERE id = ?",
+                Long.class, outerRecipient.getId())).isZero();
+        assertThat(request(source, "independent", command))
+                .isEqualTo(new IngestionResult(accepted.notificationId(), true));
+        assertCounts(source, 1, 1, 1, 1, 0);
+    }
+
+    @Test
+    void ingestionCannotSeeOuterUncommittedRecipientButCanRetryAfterCommit() {
+        var source = source();
+        var recipient = new Recipient(source.tenantId(), "https://identity.example", "uncommitted");
+        var command = command("Title", List.of(recipient.getId()));
+        actor.callAs("outer", () -> new TransactionTemplate(transactionManager).execute(status -> {
+            entityManager.persist(recipient);
+            entityManager.flush();
+            assertThatThrownBy(() -> ingestion.ingest(source, "visibility", command))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Recipients must exist, be active, and belong to the authorized tenant");
+            return null;
+        }));
+        assertCounts(source, 0, 0, 0, 0, 0);
+        assertThat(request(source, "visibility", command).replayed()).isFalse();
+        assertCounts(source, 1, 1, 1, 1, 0);
+    }
+
+    @Test
+    void acceptedRequestAndEventReplayAtAndAfterExpiryButNewKeysFail() {
+        var source = source();
+        var expiry = Instant.parse("2030-01-01T00:01:00Z");
+        var command = new IngestNotification("TYPE", "CATEGORY", "Title", "Body",
+                expiry, List.of(recipient(source.tenantId())));
+        var event = new NotificationRequestedEvent(UUID.randomUUID(), 1, "expiry", command);
+        var accepted = consumer.consume(source, event);
+        assertThat(accepted.replayed()).isFalse();
+        for (var now : List.of(expiry, expiry.plusSeconds(1))) {
+            when(clock.instant()).thenReturn(now);
+            var replay = new IngestionResult(accepted.notificationId(), true);
+            assertThat(request(source, "expiry", command)).isEqualTo(replay);
+            assertThat(consumer.consume(source, event)).isEqualTo(replay);
+            assertThatThrownBy(() -> request(source, "new-expired-key", command))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Cannot ingest an expired notification");
+            assertCounts(source, 1, 1, 1, 1, 1);
+        }
+    }
 
     @Test
     void completingMissingEventReservationFailsWithoutCreatingLedgerEntries() {
@@ -292,6 +384,92 @@ class NotificationIngestionTests {
 
     private ProducerScope source() {
         return new ProducerScope(UUID.randomUUID(), "orders-service");
+    }
+
+    @Test
+    void deactivationThatLocksFirstCausesWaitingIngestionToReject() throws Exception {
+        var source = source();
+        var id = recipient(source.tenantId());
+        var command = command("Title", List.of(id));
+        try (var blocker = jdbc.getDataSource().getConnection();
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            blocker.setAutoCommit(false);
+            try {
+                int blockerPid;
+                try (var statement = blocker.createStatement(); var rows = statement.executeQuery("SELECT pg_backend_pid()")) {
+                    rows.next();
+                    blockerPid = rows.getInt(1);
+                }
+                try (var update = blocker.prepareStatement("UPDATE app.recipient SET active = false WHERE id = ?")) {
+                    update.setObject(1, id);
+                    assertThat(update.executeUpdate()).isEqualTo(1);
+                }
+                var waiting = executor.submit(() -> request(source, "deactivation-first", command));
+                awaitBlockedBy(blockerPid);
+                blocker.commit();
+                assertThatThrownBy(() -> waiting.get(30, TimeUnit.SECONDS))
+                        .isInstanceOf(ExecutionException.class)
+                        .hasCauseInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("Recipients must exist, be active");
+            } finally {
+                blocker.rollback();
+            }
+        }
+        assertCounts(source, 0, 0, 0, 0, 0);
+        assertThat(jdbc.queryForObject("SELECT active FROM app.recipient WHERE id = ?", Boolean.class, id)).isFalse();
+    }
+
+    @Test
+    void ingestionThatLocksFirstCommitsBeforeRecipientDeactivation() throws Exception {
+        var source = source();
+        var id = recipient(source.tenantId());
+        var command = command("Title", List.of(id));
+        try (var blocker = jdbc.getDataSource().getConnection();
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            blocker.setAutoCommit(false);
+            try {
+                int blockerPid;
+                try (var statement = blocker.createStatement()) {
+                    // Pause the real service at outbox insertion, after it has locked recipients.
+                    statement.execute("LOCK TABLE app.outbox_event IN SHARE MODE");
+                    try (var rows = statement.executeQuery("SELECT pg_backend_pid()")) {
+                        rows.next();
+                        blockerPid = rows.getInt(1);
+                    }
+                }
+                var ingestionFuture = executor.submit(() -> request(source, "ingestion-first", command));
+                awaitBlockedBy(blockerPid);
+                var ingestionPid = jdbc.queryForObject(
+                        "SELECT pid FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))",
+                        Integer.class, blockerPid);
+                var deactivation = executor.submit(() -> actor.callAs("deactivate", () ->
+                        new TransactionTemplate(transactionManager).execute(status -> {
+                            entityManager.find(Recipient.class, id).deactivate();
+                            entityManager.flush();
+                            return true;
+                        })));
+                awaitBlockedBy(ingestionPid);
+                assertThat(deactivation.isDone()).isFalse();
+                blocker.commit();
+                var accepted = ingestionFuture.get(30, TimeUnit.SECONDS);
+                assertThat(accepted.replayed()).isFalse();
+                assertThat(deactivation.get(30, TimeUnit.SECONDS)).isTrue();
+                assertThat(request(source, "ingestion-first", command))
+                        .isEqualTo(new IngestionResult(accepted.notificationId(), true));
+            } finally {
+                blocker.rollback();
+            }
+        }
+        assertCounts(source, 1, 1, 1, 1, 0);
+        assertThat(jdbc.queryForObject("SELECT active FROM app.recipient WHERE id = ?", Boolean.class, id)).isFalse();
+    }
+
+    private void awaitBlockedBy(int pid) {
+        await().alias("database transaction waits for backend " + pid)
+                .pollInterval(20, TimeUnit.MILLISECONDS).atMost(10, TimeUnit.SECONDS)
+                .until(() -> jdbc.queryForObject(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid)))",
+                        Boolean.class, pid));
     }
 
     private UUID recipient(UUID tenant) {

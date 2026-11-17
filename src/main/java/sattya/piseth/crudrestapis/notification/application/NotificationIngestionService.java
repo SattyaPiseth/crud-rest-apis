@@ -11,6 +11,7 @@ import sattya.piseth.crudrestapis.inbox.domain.InboxItem;
 import sattya.piseth.crudrestapis.notification.domain.Notification;
 import sattya.piseth.crudrestapis.outbox.domain.OutboxEvent;
 import sattya.piseth.crudrestapis.recipient.domain.Recipient;
+import sattya.piseth.crudrestapis.shared.persistence.TenantDatabaseContext;
 import tools.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
@@ -30,11 +31,13 @@ public class NotificationIngestionService {
     private final RequestFingerprint fingerprint;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final TenantDatabaseContext tenantContext;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED, timeout = 30)
     public IngestionResult ingest(ProducerScope source, String idempotencyKey, IngestNotification command) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(command, "command");
+        tenantContext.setTenant(source.tenantId());
         var key = text(idempotencyKey, "idempotencyKey", 200);
         return ingestInTransaction(source, key, command, candidate(source, command));
     }
@@ -43,6 +46,7 @@ public class NotificationIngestionService {
     public IngestionResult consume(ProducerScope source, NotificationRequestedEvent event) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(event, "event");
+        tenantContext.setTenant(source.tenantId());
         var notification = candidate(source, event.command());
         var reservation = deduplication.reserveEvent(source, NotificationEventConsumer.CONSUMER_NAME,
                 event.eventId(), fingerprint.forEvent(event), notification.getId());

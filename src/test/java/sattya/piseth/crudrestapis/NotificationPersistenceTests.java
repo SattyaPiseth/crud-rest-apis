@@ -34,7 +34,8 @@ import static org.assertj.core.api.Assertions.*;
 @Testcontainers
 class NotificationPersistenceTests {
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.7-trixie");
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer("postgres:18.7-trixie").withInitScript("db/test-init.sql");
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) {
@@ -172,6 +173,7 @@ class NotificationPersistenceTests {
             entityManager.persist(notification);
             return null;
         });
+        var invalidId = UUID.randomUUID();
         Supplier<Integer> crossTenantWrite = () ->
             entityManager.createNativeQuery("""
                 INSERT INTO app.notification_recipient
@@ -180,13 +182,21 @@ class NotificationPersistenceTests {
                 VALUES (:id, :tenant, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'test', 'test',
                         :notification, :recipient)
                 """)
-                .setParameter("id", UUID.randomUUID())
+                .setParameter("id", invalidId)
                 .setParameter("tenant", UUID.randomUUID())
                 .setParameter("notification", notification.getId())
                 .setParameter("recipient", recipient.getId())
                 .executeUpdate();
         assertThatThrownBy(() -> transaction("test", crossTenantWrite))
-                .isInstanceOf(RuntimeException.class);
+                .hasRootCauseInstanceOf(java.sql.SQLException.class)
+                .rootCause().extracting(cause -> ((java.sql.SQLException) cause).getSQLState())
+                .isEqualTo("23503");
+        transaction("reader", () -> {
+            assertThat(entityManager.find(InboxItem.class, invalidId)).isNull();
+            assertThat(entityManager.find(Recipient.class, recipient.getId())).isNotNull();
+            assertThat(entityManager.find(Notification.class, notification.getId())).isNotNull();
+            return null;
+        });
     }
 
     @Test
@@ -207,7 +217,8 @@ class NotificationPersistenceTests {
             second.getTransaction().begin();
             var firstCopy = first.find(InboxItem.class, item.getId());
             var secondCopy = second.find(InboxItem.class, item.getId());
-            firstCopy.markRead(Instant.now());
+            var winningRead = Instant.parse("2030-01-01T00:00:00Z");
+            firstCopy.markRead(winningRead);
             secondCopy.markRead(Instant.now().plusSeconds(1));
             actor.callAs("first", () -> { first.getTransaction().commit(); return null; });
             var secondTransaction = second.getTransaction();
@@ -216,7 +227,14 @@ class NotificationPersistenceTests {
                 return null;
             };
             assertThatThrownBy(() -> actor.callAs("second", staleCommit))
-                    .isInstanceOf(RollbackException.class);
+                    .isInstanceOf(RollbackException.class)
+                    .hasCauseInstanceOf(OptimisticLockException.class);
+            transaction("reader", () -> {
+                var stored = entityManager.find(InboxItem.class, item.getId());
+                assertThat(stored.getReadAt()).isEqualTo(winningRead);
+                assertThat(stored.getVersion()).isEqualTo(1L);
+                return null;
+            });
         }
     }
 }

@@ -27,7 +27,7 @@ Add the mail starter when implementing the email adapter.
 All packages are under `sattya.piseth.crudrestapis`:
 
 ```text
-config/                    JPA auditing and temporary deny-all HTTP security
+config/                    JPA auditing, deny-all default, opt-in JWT HTTP security
 shared/domain/             TenantEntity, AuditedEntity, validation helpers
 shared/audit/              ActorProvider implementations and SpringAuditorAware
 recipient/domain/          External identity reference, without credentials
@@ -75,6 +75,11 @@ operations must still authorize the caller and scope queries by tenant/owner.
 or confirmed delivery. `destinationKey` is an opaque endpoint reference; endpoint
 verification/encrypted storage comes with the delivery adapter step. Do not send
 to an arbitrary address supplied in this field.
+
+`NotificationPreference` currently stores recipient/category/channel choices only.
+Stage-one ingestion does not enforce them: disabled `IN_APP` preferences do not
+suppress inbox creation. Preference filtering and the policy for an entirely
+opted-out audience remain future work.
 
 ## Auditing and timezones
 
@@ -180,8 +185,9 @@ Domain and audit unit tests can run alone:
 1. Extend in-app ingestion with templates, endpoint management, external-channel
    delivery jobs, and delivery-attempt history as needed.
 2. Configure the real identity provider, issuer/audience validation, scopes and
-   tenant membership resolution. HTTP currently denies every request; no login,
-   notification API, or SSE endpoint is exposed in this stage.
+   tenant claim issuance. The opt-in REST API validates JWTs and resolves inbox
+   membership by tenant/issuer/subject. Login/token issuance and SSE remain external
+   or future work. See the [REST guide](../development/rest-api.md).
 3. Connect the transactional consumer to Kafka; implement the outbox relay,
    delivery leases/crash recovery, retries and dead-letter handling. Never treat database
    writes plus Kafka sends as one automatically atomic transaction.

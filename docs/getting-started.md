@@ -55,7 +55,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Migrate-LocalD
 ```
 
 The helper uses the existing local admin secret inside the container to create
-a temporary migration login. It applies V1 and V2 as needed, removes the login,
+a temporary non-inheriting migration login. It applies V1 through V4 as needed, removes the login,
 and restores any existing migration environment variables. It does not change
 the runtime account's privileges or start the web application.
 
@@ -78,11 +78,12 @@ Expected behavior:
 
 - Hibernate validates the migrated schema.
 - The application uses `Asia/Phnom_Penh` for display and session timezones.
-- HTTP requests are denied by the current security policy.
+- HTTP requests are denied unless the REST API is explicitly enabled and configured.
 - No Kafka listener, email/push sender, or SSE endpoint starts.
 
 Use the [ingestion application services](development/idempotent-ingestion.md)
-from trusted application code or the tests. There is no HTTP ingestion route yet.
+from trusted application code or the tests. To enable HTTP ingestion and inbox
+operations, follow the [REST API guide](development/rest-api.md).
 
 ## Troubleshooting
 
@@ -94,7 +95,7 @@ from trusted application code or the tests. There is no HTTP ingestion route yet
 | Missing table/schema validation failure (for example, `delivery`) | Run the local migration helper before starting the application |
 | Migration permission denied | Confirm migration login membership and ability to set `crud_owner` |
 | Missing secret/config tree | Run the initialization script and use the repository root as the working directory |
-| HTTP access denied | Expected at this stage; authenticated API adapters are not implemented |
+| HTTP access denied | Check API enablement, trusted JWT configuration, token scopes, and active recipient membership |
 | Audited write has no actor | Supply authenticated context or an explicit trusted background actor |
 
 Do not change Hibernate to `ddl-auto=update` or weaken HTTP authorization to bypass

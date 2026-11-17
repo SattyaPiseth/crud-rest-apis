@@ -14,8 +14,10 @@ repository root in PowerShell.
 | Understand packages, OOP, auditing, and timestamps | [Domain model and conventions](architecture/domain-model.md) |
 | Understand the schema and UUID references | [ER diagram and relationships](architecture/er-diagram.md) |
 | Submit commands or implement a consumer adapter | [Idempotent ingestion](development/idempotent-ingestion.md) |
+| Configure JWT authorization and call HTTP endpoints | [REST API](development/rest-api.md) |
 | Run tests and inspect failures | [Testing and verification](development/testing.md) |
 | Initialize, migrate, maintain, or back up PostgreSQL | [Database operations](operations/database.md) |
+| Prepare and verify REST API security deployment | [REST API security runbook](operations/rest-api-security-runbook.md) |
 
 ## Suggested reading order
 
