@@ -7,6 +7,7 @@ import java.util.Map;
 public final class DatabaseMigrator {
     private DatabaseMigrator() {}
 
+    @SuppressWarnings("java:S1172")
     public static void main(String[] args) {
         migrate(System.getenv());
     }

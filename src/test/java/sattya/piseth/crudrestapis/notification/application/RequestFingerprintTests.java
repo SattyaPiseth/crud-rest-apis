@@ -12,7 +12,7 @@ import static org.mockito.Mockito.mockStatic;
 
 class RequestFingerprintTests {
     @Test
-    void wrapsDigestProviderFailures() throws Exception {
+    void wrapsDigestProviderFailures() {
         var command = new IngestNotification("TYPE", "CATEGORY", "Title", "Body", null,
                 List.of(UUID.randomUUID()));
         try (var messageDigest = mockStatic(MessageDigest.class)) {
