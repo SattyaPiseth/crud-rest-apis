@@ -7,6 +7,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -21,6 +22,7 @@ import java.time.Clock;
 import java.time.ZoneId;
 import tools.jackson.databind.ObjectMapper;
 import java.util.UUID;
+import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.*;
 
 @SpringBootTest(properties = {
@@ -86,11 +88,14 @@ class NotificationPersistenceTests {
     @Test
     void unauditedWriteFailsWithoutPersistingTheRecipient() {
         var recipient = new Recipient(UUID.randomUUID(), "issuer", "no-actor");
-        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status -> {
+        var transactionTemplate = new TransactionTemplate(transactionManager);
+        TransactionCallback<Void> unauditedWrite = status -> {
             entityManager.persist(recipient);
             entityManager.flush();
             return null;
-        })).isInstanceOf(IllegalStateException.class)
+        };
+        assertThatThrownBy(() -> transactionTemplate.execute(unauditedWrite))
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("actor is required");
         transaction("reader", () -> {
             assertThat(entityManager.find(Recipient.class, recipient.getId())).isNull();
@@ -105,11 +110,14 @@ class NotificationPersistenceTests {
             entityManager.persist(new Recipient(tenant, "issuer", "duplicate"));
             return null;
         });
-        assertThatThrownBy(() -> transaction("duplicate", () -> {
-            entityManager.persist(new Recipient(tenant, "issuer", "duplicate"));
+        var duplicate = new Recipient(tenant, "issuer", "duplicate");
+        Supplier<Void> duplicateWrite = () -> {
+            entityManager.persist(duplicate);
             entityManager.flush();
             return null;
-        })).isInstanceOf(PersistenceException.class);
+        };
+        assertThatThrownBy(() -> transaction("duplicate", duplicateWrite))
+                .isInstanceOf(PersistenceException.class);
     }
 
     @Test
@@ -164,7 +172,7 @@ class NotificationPersistenceTests {
             entityManager.persist(notification);
             return null;
         });
-        assertThatThrownBy(() -> transaction("test", () ->
+        Supplier<Integer> crossTenantWrite = () ->
             entityManager.createNativeQuery("""
                 INSERT INTO app.notification_recipient
                     (id, tenant_id, version, created_at, updated_at, created_by, updated_by,
@@ -176,7 +184,9 @@ class NotificationPersistenceTests {
                 .setParameter("tenant", UUID.randomUUID())
                 .setParameter("notification", notification.getId())
                 .setParameter("recipient", recipient.getId())
-                .executeUpdate())).isInstanceOf(RuntimeException.class);
+                .executeUpdate();
+        assertThatThrownBy(() -> transaction("test", crossTenantWrite))
+                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -200,10 +210,13 @@ class NotificationPersistenceTests {
             firstCopy.markRead(Instant.now());
             secondCopy.markRead(Instant.now().plusSeconds(1));
             actor.callAs("first", () -> { first.getTransaction().commit(); return null; });
-            assertThatThrownBy(() -> actor.callAs("second", () -> {
-                second.getTransaction().commit();
+            var secondTransaction = second.getTransaction();
+            Supplier<Void> staleCommit = () -> {
+                secondTransaction.commit();
                 return null;
-            })).isInstanceOf(RollbackException.class);
+            };
+            assertThatThrownBy(() -> actor.callAs("second", staleCommit))
+                    .isInstanceOf(RollbackException.class);
         }
     }
 }
