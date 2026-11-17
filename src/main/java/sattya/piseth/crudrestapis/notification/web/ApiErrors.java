@@ -44,7 +44,8 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
                         || cause instanceof PessimisticLockException);
         var id = UUID.randomUUID().toString();
         // Never log exception messages, causes, SQL parameters, JWTs, or database row detail.
-        logger.error("API failure id=" + id + " category=" + exception.getClass().getSimpleName() + " sqlState=" + sqlState);
+        var category = exception == null ? "unknown" : exception.getClass().getSimpleName();
+        logger.error("API failure id=" + id + " category=" + category + " sqlState=" + sqlState);
         var body = problem(retryable ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.INTERNAL_SERVER_ERROR,
                 retryable ? "Database temporarily unavailable; retry with the same idempotency key"
                         : "An unexpected server error occurred");

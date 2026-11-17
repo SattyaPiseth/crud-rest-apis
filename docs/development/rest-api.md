@@ -38,7 +38,10 @@ override localhost resolution in production.
 Requests use `Authorization: Bearer <access-token>`. Signature, issuer, audience,
 expiry and not-before validity are checked with Spring Security's default clock
 skew. `exp` is required explicitly. Cookies and HTTP sessions do not authenticate
-this API; CSRF is disabled for this bearer-only contract. CORS is not enabled.
+this API. Spring Security's CSRF protection remains enabled for unsafe requests
+without a bearer Authorization header; explicitly supplied bearer-token requests
+are exempt because browsers do not attach that credential ambiently. CORS is not
+enabled.
 All application paths and methods outside the endpoint table remain denied.
 Actuator health, liveness, and readiness probes are public but expose status only;
 `/actuator/info` remains denied.
@@ -177,7 +180,7 @@ applicable `detail`. Do not parse human-readable detail text as an error code.
 |---|---|
 | 400 | Missing/invalid body, header, UUID, pagination or version; invalid recipients or expired new notification; bearer `invalid_request` |
 | 401 | Missing/invalid bearer token; standard bearer challenge, with `invalid_token` for invalid credentials |
-| 403 | Insufficient scope (bearer `insufficient_scope` challenge), invalid producer identity, or no active recipient membership |
+| 403 | CSRF token required for an unsafe request without bearer credentials; insufficient scope (bearer `insufficient_scope` challenge), invalid producer identity, or no active recipient membership |
 | 404 | Inbox item does not exist within the caller's ownership scope |
 | 409 | Idempotency conflict, stale version, or optimistic-lock conflict |
 | 415 | Unsupported request content type |

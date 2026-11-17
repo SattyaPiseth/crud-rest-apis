@@ -174,6 +174,19 @@ class NotificationApiTests {
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.status").value(401));
     }
 
+    @Test void csrfRejectsUnsafeRequestsWithoutBearerCredentials() throws Exception {
+        mvc.perform(post("/api/v1/notifications").header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON).content(body(recipient, "Title")))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.status").value(403));
+        mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer invalid")
+                        .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
+                        .content(body(recipient, "Title")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", containsString("invalid_token")));
+    }
+
     @Test void acceptsOnlyPinnedRs256AndDoesNotFollowJwkRedirects() throws Exception {
         var unsupported = List.of(
                 signedToken(JWSAlgorithm.RS512, KEY),

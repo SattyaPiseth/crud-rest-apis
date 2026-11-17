@@ -1,5 +1,6 @@
 package sattya.piseth.crudrestapis.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
@@ -11,12 +12,14 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.*;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.web.client.DefaultResponseErrorHandler;
@@ -81,7 +84,7 @@ public class ApiSecurityConfiguration {
                         || !validScopes(raw.get("scope")) || !validScopes(raw.get("scp"))) {
                     throw new BadJwtException("Invalid claim types");
                 }
-            } catch (java.text.ParseException exception) {
+            } catch (java.text.ParseException _) {
                 throw new BadJwtException("Malformed token");
             }
             return decoder.decode(token);
@@ -115,8 +118,16 @@ public class ApiSecurityConfiguration {
         var entry = bearerEntryPoint();
         var denied = bearerDeniedHandler();
         return http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // This API accepts Authorization bearer tokens only, never cookie authentication.
-                .csrf(csrf -> csrf.disable())
+                // Bearer credentials are explicitly supplied, not ambient browser credentials.
+                .csrf(csrf -> csrf
+                        .ignoringRequestMatchers(ApiSecurityConfiguration::hasBearerAuthorization)
+                        .withObjectPostProcessor(new ObjectPostProcessor<CsrfFilter>() {
+                            @Override
+                            public <O extends CsrfFilter> O postProcess(O filter) {
+                                filter.setAccessDeniedHandler(denied);
+                                return filter;
+                            }
+                        }))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/notifications").hasAuthority("SCOPE_notifications:write")
@@ -131,6 +142,14 @@ public class ApiSecurityConfiguration {
                         .accessDeniedHandler(denied))
                 .addFilterAfter(new ApiRequestSizeLimitFilter(), AuthorizationFilter.class)
                 .build();
+    }
+
+    private static boolean hasBearerAuthorization(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization == null) return false;
+        int separator = authorization.indexOf(' ');
+        return separator > 0 && separator < authorization.length() - 1
+                && authorization.substring(0, separator).equalsIgnoreCase("Bearer");
     }
 
     static AuthenticationEntryPoint bearerEntryPoint() {

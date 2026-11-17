@@ -11,7 +11,7 @@ public final class JwkSetUriValidator {
         final URI uri;
         try {
             uri = URI.create(value);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException _) {
             throw new IllegalArgumentException(HTTP_POLICY);
         }
 

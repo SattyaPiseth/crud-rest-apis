@@ -8,6 +8,8 @@ import org.springframework.core.env.Environment;
 /** Validate before conditional security chains are instantiated: typos must fail closed. */
 @Configuration(proxyBeanMethods = false)
 public class ApiSettingsConfiguration {
+    private ApiSettingsConfiguration() {}
+
     @Bean
     static BeanFactoryPostProcessor validateApiSettings(Environment environment) {
         return beanFactory -> {

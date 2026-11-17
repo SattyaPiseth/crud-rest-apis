@@ -18,6 +18,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class InboxService {
+    private static final String TENANT_PARAMETER = "tenant";
+
     private final EntityManager entityManager;
     private final Clock clock;
     private final TenantDatabaseContext tenantContext;
@@ -30,7 +32,7 @@ public class InboxService {
 
     private UUID recipient(Owner owner) {
         return entityManager.createQuery("SELECT r.id FROM Recipient r WHERE r.tenantId = :tenant AND r.issuer = :issuer AND r.subject = :subject AND r.active = true", UUID.class)
-                .setParameter("tenant", owner.tenant()).setParameter("issuer", owner.issuer())
+                .setParameter(TENANT_PARAMETER, owner.tenant()).setParameter("issuer", owner.issuer())
                 .setParameter("subject", owner.subject()).getResultList().stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "No active recipient membership"));
     }
@@ -40,7 +42,7 @@ public class InboxService {
         tenantContext.setTenant(owner.tenant());
         var recipient = recipient(owner);
         var rows = entityManager.createQuery("SELECT i, n FROM InboxItem i, Notification n WHERE i.notificationId = n.id AND i.tenantId = n.tenantId AND i.tenantId = :tenant AND i.recipientId = :recipient AND i.archivedAt IS NULL ORDER BY i.createdAt DESC, i.id DESC", Object[].class)
-                .setParameter("tenant", owner.tenant()).setParameter("recipient", recipient)
+                .setParameter(TENANT_PARAMETER, owner.tenant()).setParameter("recipient", recipient)
                 .setFirstResult(page * size).setMaxResults(size + 1).getResultList();
         return new Page(rows.stream().limit(size).map(row -> view((InboxItem) row[0], (Notification) row[1])).toList(), page, size, rows.size() > size);
     }
@@ -65,13 +67,13 @@ public class InboxService {
     private InboxItem load(Owner owner, UUID id) {
         var recipient = recipient(owner);
         return entityManager.createQuery("SELECT i FROM InboxItem i WHERE i.id = :id AND i.tenantId = :tenant AND i.recipientId = :recipient", InboxItem.class)
-                .setParameter("id", id).setParameter("tenant", owner.tenant()).setParameter("recipient", recipient)
+                .setParameter("id", id).setParameter(TENANT_PARAMETER, owner.tenant()).setParameter("recipient", recipient)
                 .getResultList().stream().findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Inbox item not found"));
     }
 
     private Item view(InboxItem item) {
         var notification = entityManager.createQuery("SELECT n FROM Notification n WHERE n.id = :id AND n.tenantId = :tenant", Notification.class)
-                .setParameter("id", item.getNotificationId()).setParameter("tenant", item.getTenantId()).getSingleResult();
+                .setParameter("id", item.getNotificationId()).setParameter(TENANT_PARAMETER, item.getTenantId()).getSingleResult();
         return view(item, notification);
     }
 
