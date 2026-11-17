@@ -26,6 +26,15 @@ public abstract class TenantEntity {
         this.tenantId = Objects.requireNonNull(tenantId, "tenantId");
     }
 
+    // Explicit inherited identity accessors keep these contracts visible to source analyzers.
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getTenantId() {
+        return tenantId;
+    }
+
     public final void requireSameTenant(TenantEntity other) {
         if (!tenantId.equals(Objects.requireNonNull(other, "related entity").getTenantId())) {
             throw new IllegalArgumentException("Related entities must belong to the same tenant");

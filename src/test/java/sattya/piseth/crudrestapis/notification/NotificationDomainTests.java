@@ -18,6 +18,20 @@ class NotificationDomainTests {
     }
 
     @Test
+    void inheritedIdentityIsStableAndFlowsIntoIngestionResult() {
+        var notification = notification();
+        assertThat(notification.getId()).isNotNull();
+        assertThat(notification.getTenantId()).isEqualTo(tenant);
+        var originalId = notification.getId();
+        var result = new sattya.piseth.crudrestapis.notification.application.IngestionResult(originalId, false);
+        assertThat(result.notificationId()).isEqualTo(originalId);
+        assertThat(notification.getId()).isEqualTo(originalId);
+        assertThat(result.replayed()).isFalse();
+        assertThat(result).isEqualTo(
+                new sattya.piseth.crudrestapis.notification.application.IngestionResult(originalId, false));
+    }
+
+    @Test
     void refusesCrossTenantRecipient() {
         var other = new Recipient(UUID.randomUUID(), "issuer", "subject");
         assertThatIllegalArgumentException().isThrownBy(() -> new InboxItem(notification(), other));
