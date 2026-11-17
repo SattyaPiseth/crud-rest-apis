@@ -7,7 +7,7 @@ import java.util.Map;
 public final class DatabaseMigrator {
     private DatabaseMigrator() {}
 
-    public static void main() {
+    public static void main(String[] args) {
         migrate(System.getenv());
     }
 

@@ -5,8 +5,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.Answers.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 class DatabaseMigratorTests {
+    @Test
+    void mainDelegatesEnvironmentToMigration() {
+        try (var migrator = mockStatic(DatabaseMigrator.class, CALLS_REAL_METHODS)) {
+            migrator.when(() -> DatabaseMigrator.migrate(anyMap())).thenAnswer(invocation -> null);
+
+            DatabaseMigrator.main(new String[0]);
+
+            migrator.verify(() -> DatabaseMigrator.migrate(anyMap()));
+        }
+    }
+
     @Test
     void rejectsEachMissingSettingBeforeConnectingToTheDatabase() {
         for (var name : List.of("MIGRATION_DB_URL", "MIGRATION_DB_USERNAME", "MIGRATION_DB_PASSWORD")) {
