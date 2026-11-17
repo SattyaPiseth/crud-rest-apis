@@ -28,6 +28,22 @@ class SpringAuditorAwareTests {
     }
 
     @Test
+    void rejectsUnauthenticatedPrincipal() {
+        var context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(UsernamePasswordAuthenticationToken.unauthenticated("alice", "unused"));
+        SecurityContextHolder.setContext(context);
+        assertThatIllegalStateException().isThrownBy(auditor::getCurrentAuditor);
+    }
+
+    @Test
+    void authenticatedNonJwtPrincipalHasAnExplicitIdentityPrefix() {
+        var context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(new TestingAuthenticationToken("alice", "unused", "ROLE_USER"));
+        SecurityContextHolder.setContext(context);
+        assertThat(auditor.getCurrentAuditor()).contains("principal:alice");
+    }
+
+    @Test
     void includesIssuerInJwtActorIdentity() {
         var jwt = Jwt.withTokenValue("test-token").header("alg", "RS256")
                 .issuer("https://identity.example").subject("alice").build();

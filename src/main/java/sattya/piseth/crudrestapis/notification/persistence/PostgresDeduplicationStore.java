@@ -4,9 +4,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.AuditorAware;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Component;
 import sattya.piseth.crudrestapis.notification.application.*;
 import java.time.Clock;
 import java.time.Instant;
@@ -17,9 +15,8 @@ import java.util.UUID;
  * ON CONFLICT waits for competing transactions without aborting this transaction.
  * The separate SELECT gets a fresh READ COMMITTED snapshot after that wait.
  */
-@Repository
+@Component
 @RequiredArgsConstructor
-@Transactional(propagation = Propagation.MANDATORY)
 public class PostgresDeduplicationStore implements DeduplicationStore {
     private static final String CONSUMER_PARAMETER = "consumer";
     private static final String EVENT_PARAMETER = "event";

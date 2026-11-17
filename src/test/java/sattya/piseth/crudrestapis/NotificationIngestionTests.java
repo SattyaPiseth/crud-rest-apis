@@ -51,6 +51,22 @@ class NotificationIngestionTests {
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper objectMapper;
+    @Autowired DeduplicationStore deduplicationStore;
+
+    @Test
+    void completingMissingEventReservationFailsWithoutCreatingLedgerEntries() {
+        var source = source();
+        var eventId = UUID.randomUUID();
+        var notificationId = UUID.randomUUID();
+        var transaction = new TransactionTemplate(transactionManager);
+        Supplier<Void> completion = () -> transaction.execute(status -> {
+            deduplicationStore.completeEvent(source, "test-consumer", eventId, notificationId);
+            return null;
+        });
+        assertThatIllegalStateException().isThrownBy(() -> actor.callAs("test-consumer", completion))
+                .withMessage("Event reservation is missing");
+        assertCounts(source, 0, 0, 0, 0, 0);
+    }
 
     @Test
     void sameRequestReturnsOriginalReceiptAndCanonicalizesRecipientOrder() {
