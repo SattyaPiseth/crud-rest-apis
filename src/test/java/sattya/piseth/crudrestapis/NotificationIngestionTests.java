@@ -161,6 +161,19 @@ class NotificationIngestionTests {
     }
 
     @Test
+    void ingestionWithoutAnAuditActorFailsBeforeWriting() {
+        var source = source();
+        var id = recipient(source.tenantId());
+
+        assertThatIllegalStateException()
+                .isThrownBy(() -> ingestion.ingest(source, "missing-actor",
+                        command("Title", List.of(id))))
+                .withMessage("An authenticated or explicit background actor is required for audited writes");
+
+        assertCounts(source, 0, 0, 0, 0, 0);
+    }
+
+    @Test
     void sameRequestReturnsOriginalReceiptAndCanonicalizesRecipientOrder() {
         var source = source();
         var alice = recipient(source.tenantId());

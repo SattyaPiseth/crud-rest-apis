@@ -54,6 +54,7 @@ class NotificationApiTests {
     static final ECKey EC_KEY;
     static final HttpServer JWKS;
     static final AtomicBoolean REDIRECT_JWKS = new AtomicBoolean();
+    static final AtomicInteger JWKS_STATUS = new AtomicInteger(200);
     static final AtomicInteger REDIRECT_TARGET_REQUESTS = new AtomicInteger();
     static final ExecutorService JWKS_EXECUTOR = Executors.newCachedThreadPool();
     static {
@@ -66,6 +67,11 @@ class NotificationApiTests {
                 if (REDIRECT_JWKS.get()) {
                     exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + JWKS.getAddress().getPort() + "/jwks-redirect-target");
                     exchange.sendResponseHeaders(302, -1);
+                    exchange.close();
+                    return;
+                }
+                if (JWKS_STATUS.get() != 200) {
+                    exchange.sendResponseHeaders(JWKS_STATUS.get(), -1);
                     exchange.close();
                     return;
                 }
@@ -215,6 +221,17 @@ class NotificationApiTests {
         }
     }
 
+    @Test void rejectsJwkServerErrorResponses() throws Exception {
+        var unknownKey = new RSAKeyGenerator(2048).keyID(UUID.randomUUID().toString()).generate();
+        JWKS_STATUS.set(503);
+        try {
+            assertThatThrownBy(() -> decoder.decode(signedToken(JWSAlgorithm.RS256, unknownKey)))
+                    .isInstanceOf(org.springframework.security.oauth2.jwt.JwtException.class);
+        } finally {
+            JWKS_STATUS.set(200);
+        }
+    }
+
     private String signedToken(JWSAlgorithm algorithm, JWK key) throws Exception {
         var header = new JWSHeader.Builder(algorithm).keyID(key == null ? "hmac-key" : key.getKeyID()).build();
         var token = new SignedJWT(header, baseClaims().build());
@@ -314,6 +331,13 @@ class NotificationApiTests {
         mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + missingProducer)
                 .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON).content(body(recipient, "Title")))
                 .andExpect(status().isForbidden());
+        for (var producerId : List.of("", "x".repeat(101))) {
+            var invalidProducer = sign(base.expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                    .claim("client_id", producerId).build());
+            mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + invalidProducer)
+                    .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
+                    .content(body(recipient, "Title"))).andExpect(status().isForbidden());
+        }
     }
 
     @Test void readAndWriteScopesAreIndependentAndUnsupportedRoutesStayDenied() throws Exception {

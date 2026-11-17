@@ -1,5 +1,6 @@
 package sattya.piseth.crudrestapis.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -31,6 +32,20 @@ class ApiConfigurationTests {
                 .run(context -> assertThat(context.getStartupFailure()).hasMessageContaining("app.api.issuer is required"));
     }
 
+    @Test void jwtDecoderRejectsBlankOrOversizedConfigurationBeforeNetworkAccess() {
+        var configuration = new ApiSecurityConfiguration();
+        for (var values : new String[][]{
+                {"", "https://identity.example/jwks", "api"},
+                {"i".repeat(301), "https://identity.example/jwks", "api"},
+                {"https://identity.example", " ", "api"},
+                {"https://identity.example", "https://identity.example/jwks", ""}
+        }) {
+            assertThatIllegalArgumentException()
+                    .isThrownBy(() -> configuration.jwtDecoder(values[0], values[1], values[2]))
+                    .withMessage("API issuer, JWK URL and audience are required");
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "https://identity.example/jwks",
@@ -56,6 +71,7 @@ class ApiConfigurationTests {
             "https://user:password@identity.example/jwks",
             "https://identity.example/jwks#fragment",
             "https://identity.example:99999/jwks",
+            "https://identity.example:0/jwks",
             "https://",
             "/relative/jwks",
             "https://identity example/jwks"
@@ -119,6 +135,12 @@ class ApiConfigurationTests {
                 request("PUT", "/api/v1/inbox/123/delete", "Bearer value"))).isFalse();
         assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
                 request("POST", "/api/v1/notifications", null))).isFalse();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("POST", "/api/v1/notifications", "Basic value"))).isFalse();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("POST", "/api/v1/notifications", "Bearer"))).isFalse();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("POST", "/api/v1/notifications", "Bearer "))).isFalse();
     }
 
     private static MockHttpServletRequest request(String method, String path, String authorization) {
@@ -161,6 +183,31 @@ class ApiConfigurationTests {
             assertThat(response.getStatus()).isEqualTo(200);
             assertThat(received.get()).containsExactly(body);
         }
+    }
+
+    @Test void cachedRequestSupportsReaderCharsetsAndSynchronousStreamState() throws Exception {
+        var latin1Request = requestWithContentLength(new byte[]{(byte) 0xE9}, -1);
+        var latin1 = filteredRequest(latin1Request).getReader();
+        assertThat(latin1.readLine()).isEqualTo("\u00e9");
+
+        var utf8Request = requestWithContentLength("\u00e9".getBytes(java.nio.charset.StandardCharsets.UTF_8), -1);
+        utf8Request.setCharacterEncoding("UTF-8");
+        assertThat(filteredRequest(utf8Request).getReader().readLine()).isEqualTo("\u00e9");
+
+        var stream = filteredRequest(requestWithContentLength(new byte[]{65}, -1)).getInputStream();
+        assertThat(stream.isReady()).isTrue();
+        assertThat(stream.isFinished()).isFalse();
+        assertThat(stream.read()).isEqualTo(65);
+        assertThat(stream.isFinished()).isTrue();
+        assertThatIllegalStateException().isThrownBy(() -> stream.setReadListener(null))
+                .withMessage("Asynchronous request reads are not supported");
+    }
+
+    private static HttpServletRequest filteredRequest(MockHttpServletRequest request) throws Exception {
+        var wrapped = new java.util.concurrent.atomic.AtomicReference<HttpServletRequest>();
+        new ApiRequestSizeLimitFilter().doFilter(request, new MockHttpServletResponse(),
+                (servletRequest, servletResponse) -> wrapped.set((HttpServletRequest) servletRequest));
+        return wrapped.get();
     }
 
     private static MockHttpServletRequest requestWithContentLength(byte[] body, int declaredLength) {
