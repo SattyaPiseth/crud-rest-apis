@@ -6,7 +6,7 @@ import org.flywaydb.core.Flyway;
 public final class DatabaseMigrator {
     private DatabaseMigrator() {}
 
-    public static void main(String[] args) {
+    public static void main() {
         Flyway.configure()
                 .dataSource(required("MIGRATION_DB_URL"), required("MIGRATION_DB_USERNAME"),
                         required("MIGRATION_DB_PASSWORD"))

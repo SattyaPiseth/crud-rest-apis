@@ -24,6 +24,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.*;
+import static org.awaitility.Awaitility.await;
 
 @SpringBootTest(properties = {
     "spring.flyway.enabled=true",
@@ -75,7 +76,8 @@ class NotificationIngestionTests {
         var source = source();
         var recipients = List.of(recipient(source.tenantId()));
         var original = request(source, "key", command("Original", recipients));
-        assertThatThrownBy(() -> request(source, "key", command("Changed", recipients)))
+        var changed = command("Changed", recipients);
+        assertThatThrownBy(() -> request(source, "key", changed))
                 .isInstanceOf(IdempotencyConflictException.class);
         assertThat(request(source, "key", command("Original", recipients)).notificationId())
                 .isEqualTo(original.notificationId());
@@ -145,14 +147,16 @@ class NotificationIngestionTests {
     void crossTenantAndInactiveRecipientsAreRejectedWithoutPartialWrites() {
         var source = source();
         var foreignId = recipient(UUID.randomUUID());
-        assertThatThrownBy(() -> request(source, "foreign", command("Title", List.of(foreignId))))
+        var foreignCommand = command("Title", List.of(foreignId));
+        assertThatThrownBy(() -> request(source, "foreign", foreignCommand))
                 .isInstanceOf(IllegalArgumentException.class);
         var inactive = recipient(source.tenantId());
         actor.callAs("seed", () -> new TransactionTemplate(transactionManager).execute(status -> {
             entityManager.find(Recipient.class, inactive).deactivate();
             return null;
         }));
-        assertThatThrownBy(() -> request(source, "inactive", command("Title", List.of(inactive))))
+        var inactiveCommand = command("Title", List.of(inactive));
+        assertThatThrownBy(() -> request(source, "inactive", inactiveCommand))
                 .isInstanceOf(IllegalArgumentException.class);
         assertCounts(source, 0, 0, 0, 0, 0);
     }
@@ -204,7 +208,7 @@ class NotificationIngestionTests {
             try {
                 request(source, "key", command("Title " + sequence.incrementAndGet(), recipients));
                 return "accepted";
-            } catch (IdempotencyConflictException expected) {
+            } catch (IdempotencyConflictException _) {
                 return "conflict";
             }
         });
@@ -235,18 +239,14 @@ class NotificationIngestionTests {
                     statement.executeUpdate();
                 }
                 var waiting = executor.submit(() -> request(source, "key", command));
-                var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                boolean blocked = false;
-                while (System.nanoTime() < deadline) {
-                    blocked = jdbc.queryForObject("""
+                await().alias("duplicate request waits on the uncommitted unique key")
+                        .pollInterval(20, TimeUnit.MILLISECONDS)
+                        .atMost(10, TimeUnit.SECONDS)
+                        .until(() -> jdbc.queryForObject("""
                             SELECT EXISTS (SELECT 1 FROM pg_stat_activity
                             WHERE wait_event_type = 'Lock'
                               AND query ILIKE '%INSERT INTO app.ingestion_request%')
-                            """, Boolean.class);
-                    if (blocked) break;
-                    Thread.sleep(20);
-                }
-                assertThat(blocked).as("duplicate request waits on the uncommitted unique key").isTrue();
+                            """, Boolean.class));
                 connection.rollback();
                 assertThat(waiting.get(30, TimeUnit.SECONDS).replayed()).isFalse();
             } finally {

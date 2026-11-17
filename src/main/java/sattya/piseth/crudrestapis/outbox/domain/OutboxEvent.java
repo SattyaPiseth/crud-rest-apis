@@ -27,14 +27,17 @@ public class OutboxEvent extends AuditedEntity {
     private Instant publishedAt;
 
     public OutboxEvent(UUID tenantId, UUID aggregateId, String eventType, int schemaVersion, String payload) {
-        super(tenantId);
-        this.aggregateId = Objects.requireNonNull(aggregateId, "aggregateId");
-        this.eventType = text(eventType, "eventType", 100);
+        Objects.requireNonNull(aggregateId, "aggregateId");
+        eventType = text(eventType, "eventType", 100);
         if (schemaVersion < 1) {
             throw new IllegalArgumentException("schemaVersion must be positive");
         }
+        payload = text(payload, "payload", 20000);
+        super(tenantId);
+        this.aggregateId = aggregateId;
+        this.eventType = eventType;
         this.schemaVersion = schemaVersion;
-        this.payload = text(payload, "payload", 20000);
+        this.payload = payload;
     }
 
     public void markPublished(Instant when) {
