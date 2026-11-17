@@ -39,9 +39,10 @@ Requests use `Authorization: Bearer <access-token>`. Signature, issuer, audience
 expiry and not-before validity are checked with Spring Security's default clock
 skew. `exp` is required explicitly. Cookies and HTTP sessions do not authenticate
 this API. Spring Security's CSRF protection remains enabled for unsafe requests
-without a bearer Authorization header; explicitly supplied bearer-token requests
-are exempt because browsers do not attach that credential ambiently. CORS is not
-enabled.
+without a bearer Authorization header and on routes not configured for API writes.
+Only the notification POST and inbox read/archive PUT routes skip CSRF when an
+explicit bearer token is supplied, because browsers do not attach that credential
+ambiently. CORS is not enabled.
 All application paths and methods outside the endpoint table remain denied.
 Actuator health, liveness, and readiness probes are public but expose status only;
 `/actuator/info` remains denied.

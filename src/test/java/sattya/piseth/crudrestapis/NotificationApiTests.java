@@ -185,6 +185,11 @@ class NotificationApiTests {
                         .content(body(recipient, "Title")))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string("WWW-Authenticate", containsString("invalid_token")));
+        mvc.perform(put("/api/v1/inbox/" + UUID.randomUUID() + "/archive")
+                        .header("Authorization", "Bearer invalid").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":0}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", containsString("invalid_token")));
     }
 
     @Test void acceptsOnlyPinnedRs256AndDoesNotFollowJwkRedirects() throws Exception {
@@ -387,7 +392,7 @@ class NotificationApiTests {
                 + "x".repeat(262144) + "\",\"recipientIds\":[\"" + UUID.randomUUID() + "\"]}";
         mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + producer())
                         .header("Idempotency-Key", "oversized").contentType(MediaType.APPLICATION_JSON).content(oversized))
-                .andExpect(status().isPayloadTooLarge())
+                .andExpect(status().isContentTooLarge())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.status").value(413));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM app.ingestion_request WHERE tenant_id=?", Long.class, tenant)).isZero();

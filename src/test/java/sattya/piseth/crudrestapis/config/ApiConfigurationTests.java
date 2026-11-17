@@ -41,7 +41,7 @@ class ApiConfigurationTests {
             "http://localhost:8080/jwks"
     })
     void acceptsHttpsAndExplicitLoopbackJwkUris(String value) {
-        assertThat(JwkSetUriValidator.validate(value).toString()).isEqualTo(value);
+        assertThat(JwkSetUriValidator.validate(value)).hasToString(value);
     }
 
     @ParameterizedTest
@@ -102,6 +102,30 @@ class ApiConfigurationTests {
         assertThat(response.getStatus()).isEqualTo(400);
         assertThat(response.getHeader("WWW-Authenticate")).contains("invalid_request");
         assertThat(response.getContentAsString()).contains("\"status\":400");
+    }
+
+    @Test void csrfBearerExemptionMatchesOnlyConfiguredWriteRoutes() {
+        var notification = request("POST", "/api/v1/notifications", "Bearer value");
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(notification)).isTrue();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("POST", "/api/v1/unconfigured", "Bearer value"))).isFalse();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("GET", "/api/v1/inbox", "Bearer value"))).isFalse();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("PUT", "/api/v1/inbox/123/read", "Bearer value"))).isTrue();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("PUT", "/api/v1/inbox/123/archive", "Bearer value"))).isTrue();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("PUT", "/api/v1/inbox/123/delete", "Bearer value"))).isFalse();
+        assertThat(ApiSecurityConfiguration.isBearerApiWriteRequest(
+                request("POST", "/api/v1/notifications", null))).isFalse();
+    }
+
+    private static MockHttpServletRequest request(String method, String path, String authorization) {
+        var request = new MockHttpServletRequest(method, path);
+        request.setServletPath(path);
+        if (authorization != null) request.addHeader("Authorization", authorization);
+        return request;
     }
 
     @Test void requestBodyLimitRejectsOversizeStreamsWithMissingOrUnderreportedLength() throws Exception {

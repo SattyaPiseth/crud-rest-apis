@@ -100,7 +100,7 @@ public class ApiSecurityConfiguration {
                         && jwt.getExpiresAt() != null && jwt.getAudience().contains(audience)
                         && validScopes(jwt.getClaims().get("scope")) && validScopes(jwt.getClaims().get("scp"));
                 if (valid) return OAuth2TokenValidatorResult.success();
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException _) {
                 // Malformed claim types are authentication failures, not application errors.
             }
             return OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "Invalid required claims", null));
@@ -120,7 +120,7 @@ public class ApiSecurityConfiguration {
         return http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // Bearer credentials are explicitly supplied, not ambient browser credentials.
                 .csrf(csrf -> csrf
-                        .ignoringRequestMatchers(ApiSecurityConfiguration::hasBearerAuthorization)
+                        .ignoringRequestMatchers(ApiSecurityConfiguration::isBearerApiWriteRequest)
                         .withObjectPostProcessor(new ObjectPostProcessor<CsrfFilter>() {
                             @Override
                             public <O extends CsrfFilter> O postProcess(O filter) {
@@ -144,7 +144,13 @@ public class ApiSecurityConfiguration {
                 .build();
     }
 
-    private static boolean hasBearerAuthorization(HttpServletRequest request) {
+    static boolean isBearerApiWriteRequest(HttpServletRequest request) {
+        String method = request.getMethod();
+        String path = request.getServletPath();
+        boolean apiWrite = method.equals("POST") && path.equals("/api/v1/notifications")
+                || method.equals("PUT") && path.matches("/api/v1/inbox/[^/]+/(read|archive)");
+        if (!apiWrite) return false;
+
         String authorization = request.getHeader("Authorization");
         if (authorization == null) return false;
         int separator = authorization.indexOf(' ');
