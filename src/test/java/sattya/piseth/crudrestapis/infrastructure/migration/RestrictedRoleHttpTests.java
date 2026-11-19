@@ -134,8 +134,8 @@ class RestrictedRoleHttpTests {
             tenantContext.setTenant(tenant);
             var row = jdbc.queryForMap("SELECT created_by, updated_by, version, read_at, archived_at "
                     + "FROM app.notification_recipient WHERE id = ?", UUID.fromString(id));
-            assertThat(row.get("created_by")).isEqualTo(auditIdentity("producer"));
-            assertThat(row.get("updated_by")).isEqualTo(auditIdentity("reader"));
+            assertThat(row).containsEntry("created_by", auditIdentity("producer"));
+            assertThat(row).containsEntry("updated_by", auditIdentity("reader"));
             assertThat(((Number) row.get("version")).longValue()).isEqualTo(version);
             assertThat(row.get("read_at")).isNotNull();
             if (archived) assertThat(row.get("archived_at")).isNotNull();
@@ -183,10 +183,43 @@ class RestrictedRoleHttpTests {
         var itemsA = mapper.readTree(listA.body()).path("items");
         var itemsB = mapper.readTree(listB.body()).path("items");
         assertThat(itemsA.size()).isEqualTo(1); assertThat(itemsB.size()).isEqualTo(1);
-        var id = itemsA.get(0).path("id").asText();
-        assertThat(itemsB.get(0).path("id").asText()).isNotEqualTo(id);
+        var id = itemsA.get(0).path("id").asString();
+        assertThat(itemsB.get(0).path("id").asString()).isNotEqualTo(id);
         assertThat(request("GET", "/inbox/" + id, tokenB, null).statusCode()).isEqualTo(404);
         assertThat(request("PUT", "/inbox/" + id + "/read", tokenB, "{\"version\":0}").statusCode()).isEqualTo(404);
+        for (var tenant : List.of(a, b)) {
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                tenantContext.setTenant(tenant);
+                assertThat(jdbc.queryForObject("SELECT count(*) FROM app.notification", Long.class)).isEqualTo(1);
+                assertThat(jdbc.queryForObject("SELECT count(*) FROM app.ingestion_request", Long.class)).isEqualTo(1);
+                for (var table : List.of("notification", "notification_recipient", "outbox_event", "ingestion_request")) {
+                    assertThat(jdbc.queryForObject("SELECT created_by FROM app." + table, String.class))
+                            .as("%s creation actor for tenant %s", table, tenant)
+                            .isEqualTo(auditIdentity("producer"));
+                }
+                if (tenant.equals(b)) {
+                    assertThat(jdbc.queryForObject("SELECT updated_by FROM app.notification_recipient", String.class))
+                            .isEqualTo(auditIdentity("producer"));
+                    assertThat(jdbc.queryForObject("SELECT version FROM app.notification_recipient", Long.class)).isZero();
+                }
+            });
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM app.notification", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT NULLIF(current_setting('app.tenant_id',true),'')", String.class)).isNull();
+        assertThat(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class)).isEqualTo(backend);
+    }
+
+    @Test void recipientLifecyclePreservesAuditAndRejectsStaleMutations() throws Exception {
+        var a = UUID.randomUUID();
+        var recipient = seed(a);
+        var tokenA = token(a, "http-test-client", "http-test-audience", null);
+        var producer = token(a, "http-test-client", "http-test-audience", null, "producer");
+        assertThat(request("POST", "/notifications", producer, body(recipient)).statusCode()).isEqualTo(201);
+        var list = request("GET", "/inbox", tokenA, null);
+        assertThat(list.statusCode()).isEqualTo(200);
+        var items = mapper.readTree(list.body()).path("items");
+        assertThat(items.size()).isEqualTo(1);
+        var id = items.get(0).path("id").asString();
         assertThat(request("GET", "/inbox/" + id, tokenA, null).statusCode()).isEqualTo(200);
         assertThat(request("PUT", "/inbox/" + id + "/read", tokenA, "{\"version\":0}").statusCode()).isEqualTo(200);
         assertInboxAudit(a, id, 1, false);
@@ -211,26 +244,6 @@ class RestrictedRoleHttpTests {
             assertThat(jdbc.queryForMap("SELECT * FROM app.notification_recipient WHERE id=?", UUID.fromString(id)))
                     .isEqualTo(beforeRejected);
         });
-        for (var tenant : List.of(a, b)) {
-            new TransactionTemplate(transactions).executeWithoutResult(status -> {
-                tenantContext.setTenant(tenant);
-                assertThat(jdbc.queryForObject("SELECT count(*) FROM app.notification", Long.class)).isEqualTo(1);
-                assertThat(jdbc.queryForObject("SELECT count(*) FROM app.ingestion_request", Long.class)).isEqualTo(1);
-                for (var table : List.of("notification", "notification_recipient", "outbox_event", "ingestion_request")) {
-                    assertThat(jdbc.queryForObject("SELECT created_by FROM app." + table, String.class))
-                            .as("%s creation actor for tenant %s", table, tenant)
-                            .isEqualTo(auditIdentity("producer"));
-                }
-                if (tenant.equals(b)) {
-                    assertThat(jdbc.queryForObject("SELECT updated_by FROM app.notification_recipient", String.class))
-                            .isEqualTo(auditIdentity("producer"));
-                    assertThat(jdbc.queryForObject("SELECT version FROM app.notification_recipient", Long.class)).isZero();
-                }
-            });
-        }
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM app.notification", Long.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT NULLIF(current_setting('app.tenant_id',true),'')", String.class)).isNull();
-        assertThat(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class)).isEqualTo(backend);
     }
 
     @Test void startupGuardFailsClosedAndOnlyStartsForVerifiedUnaffectedFlags() throws Exception {
@@ -272,14 +285,14 @@ class RestrictedRoleHttpTests {
         assertThat(request("POST", "/notifications", producer, body(recipient)).statusCode()).isEqualTo(201);
         var list = request("GET", "/inbox", reader, null);
         assertThat(list.statusCode()).isEqualTo(200);
-        var id = UUID.fromString(mapper.readTree(list.body()).path("items").get(0).path("id").asText());
+        var id = UUID.fromString(mapper.readTree(list.body()).path("items").get(0).path("id").asString());
         assertThat(request("PUT", "/inbox/" + id + "/archive", reader, "{\"version\":0}").statusCode()).isEqualTo(200);
         new TransactionTemplate(transactions).executeWithoutResult(status -> {
             tenantContext.setTenant(tenant);
             var row = jdbc.queryForMap("SELECT created_by, updated_by, version, read_at, archived_at "
                     + "FROM app.notification_recipient WHERE id = ?", id);
-            assertThat(row.get("created_by")).isEqualTo(auditIdentity("producer"));
-            assertThat(row.get("updated_by")).isEqualTo(auditIdentity("reader"));
+            assertThat(row).containsEntry("created_by", auditIdentity("producer"));
+            assertThat(row).containsEntry("updated_by", auditIdentity("reader"));
             assertThat(((Number) row.get("version")).longValue()).isEqualTo(1);
             assertThat(row.get("read_at")).isNull();
             assertThat(row.get("archived_at")).isNotNull();

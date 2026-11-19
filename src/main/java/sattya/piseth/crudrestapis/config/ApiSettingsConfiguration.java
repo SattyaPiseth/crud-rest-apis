@@ -17,16 +17,17 @@ public class ApiSettingsConfiguration {
             if (!enabled.equalsIgnoreCase("true") && !enabled.equalsIgnoreCase("false")) {
                 throw new IllegalArgumentException("app.api.enabled must be true or false");
             }
-            if (Boolean.parseBoolean(enabled)) {
-                for (var name : new String[]{"app.api.issuer", "app.api.jwk-set-uri", "app.api.audience"}) {
-                    var value = environment.getProperty(name);
-                    if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required");
-                }
-                if (environment.getProperty("app.api.role-source-client", "notification-api").isBlank()) {
-                    throw new IllegalArgumentException("app.api.role-source-client must not be blank");
-                }
-                JwkSetUriValidator.validate(environment.getProperty("app.api.jwk-set-uri"));
+            if (!Boolean.parseBoolean(enabled)) {
+                return;
             }
+            for (var name : new String[]{"app.api.issuer", "app.api.jwk-set-uri", "app.api.audience"}) {
+                var value = environment.getProperty(name);
+                if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required");
+            }
+            if (environment.getProperty("app.api.role-source-client", "notification-api").isBlank()) {
+                throw new IllegalArgumentException("app.api.role-source-client must not be blank");
+            }
+            JwkSetUriValidator.validate(environment.getProperty("app.api.jwk-set-uri"));
         };
     }
 }
