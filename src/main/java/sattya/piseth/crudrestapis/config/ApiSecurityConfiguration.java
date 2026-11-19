@@ -56,22 +56,7 @@ public class ApiSecurityConfiguration {
                 .build());
         requestFactory.setReadTimeout(Duration.ofSeconds(5));
         var restOperations = new RestTemplate(requestFactory);
-        var defaultErrors = new DefaultResponseErrorHandler();
-        restOperations.setErrorHandler(new ResponseErrorHandler() {
-            @Override
-            public boolean hasError(ClientHttpResponse response) throws IOException {
-                return response.getStatusCode().is3xxRedirection() || defaultErrors.hasError(response);
-            }
-
-            @Override
-            public void handleError(URI url, org.springframework.http.HttpMethod method, ClientHttpResponse response)
-                    throws IOException {
-                if (response.getStatusCode().is3xxRedirection()) {
-                    throw new IOException("JWK Set endpoint redirects are not allowed");
-                }
-                defaultErrors.handleError(url, method, response);
-            }
-        });
+        restOperations.setErrorHandler(jwkResponseErrorHandler());
         var decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri)
                 .jwsAlgorithm(SignatureAlgorithm.RS256)
                 .restOperations(restOperations)
@@ -96,6 +81,28 @@ public class ApiSecurityConfiguration {
                 throw new BadJwtException("Malformed token");
             }
             return decoder.decode(token);
+        };
+    }
+
+    static ResponseErrorHandler jwkResponseErrorHandler() {
+        return jwkResponseErrorHandler(new DefaultResponseErrorHandler());
+    }
+
+    static ResponseErrorHandler jwkResponseErrorHandler(ResponseErrorHandler defaultErrors) {
+        return new ResponseErrorHandler() {
+            @Override
+            public boolean hasError(ClientHttpResponse response) throws IOException {
+                return response.getStatusCode().is3xxRedirection() || defaultErrors.hasError(response);
+            }
+
+            @Override
+            public void handleError(URI url, org.springframework.http.HttpMethod method, ClientHttpResponse response)
+                    throws IOException {
+                if (response.getStatusCode().is3xxRedirection()) {
+                    throw new IOException("JWK Set endpoint redirects are not allowed");
+                }
+                defaultErrors.handleError(url, method, response);
+            }
         };
     }
 

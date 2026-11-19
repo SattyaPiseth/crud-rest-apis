@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.mock.http.client.MockClientHttpResponse;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.mock.web.*;
@@ -52,6 +53,19 @@ class ApiConfigurationTests {
                     .isThrownBy(() -> configuration.jwtDecoder(values[0], values[1], values[2]))
                     .withMessage("API issuer, JWK URL and audience are required");
         }
+    }
+
+    @Test void jwkResponseErrorHandlerDelegatesNonRedirectErrors() throws Exception {
+        var response = new MockClientHttpResponse(new byte[0], org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
+        var defaultErrors = org.mockito.Mockito.mock(org.springframework.web.client.ResponseErrorHandler.class);
+        var url = java.net.URI.create("https://identity.example/jwks");
+        var method = org.springframework.http.HttpMethod.GET;
+        org.mockito.Mockito.when(defaultErrors.hasError(response)).thenReturn(true);
+        var handler = ApiSecurityConfiguration.jwkResponseErrorHandler(defaultErrors);
+
+        assertThat(handler.hasError(response)).isTrue();
+        handler.handleError(url, method, response);
+        org.mockito.Mockito.verify(defaultErrors).handleError(url, method, response);
     }
 
     @ParameterizedTest
