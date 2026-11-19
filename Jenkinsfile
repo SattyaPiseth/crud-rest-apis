@@ -1,4 +1,4 @@
-@Library('shared-library@master') _
+@Library('shared-library') _
 
 pipeline {
     agent any
@@ -12,15 +12,13 @@ pipeline {
 
     environment {
         PROJECT_NAME = 'crud-rest-apis'
-        GIT_REPO = 'https://github.com/SattyaPiseth/crud-rest-apis.git'
-        GIT_BRANCH = 'main'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 deleteDir()
-                git(branch: env.GIT_BRANCH, url: env.GIT_REPO)
+                checkout scm
                 sh 'git rev-parse HEAD'
             }
         }
