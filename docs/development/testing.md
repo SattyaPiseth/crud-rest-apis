@@ -251,8 +251,12 @@ not the RLS test.
 ## CI coverage and limits
 
 The checked-in `Jenkinsfile` runs `./gradlew --no-daemon test jacocoTestReport`
-on JDK 27, requires Docker for Testcontainers, archives JUnit/JaCoCo results, and
-then invokes the configured SonarQube quality gate. The full Gradle test task
+on JDK 27, checks out the exact revision selected by the Jenkins job's SCM, requires
+Docker for Testcontainers, archives JUnit/JaCoCo results, and then invokes the
+configured SonarQube quality gate. Configure the Jenkins `shared-library` global
+library's default version as an approved immutable commit SHA and disable version
+overrides; its repository and approved SHA are managed outside this repository.
+The full Gradle test task
 includes the JWT/JWK, RLS/restricted-role, migration, request-size, and API error
 regressions described above; there are no separate duplicated security jobs.
 This repository has no production deployment workflow or ingress-manifest
@@ -317,7 +321,7 @@ reads. This is user-reported manual evidence, separate from independently execut
 automated HTTP tests and database inspection. No existing user was deactivated
 and no additional persistent memberships were created for sign-off.
 
-The final automated baseline passed 128 tests across 17 suites with no failures,
-errors, or skips, and JaCoCo reporting completed. Local development sign-off
-covers the ingestion and inbox API; production deployment and outbox publication
-remain outside this completed milestone.
+A full Gradle test run on 2026-11-19 passed 129 tests across 17 suites with no
+failures, errors, or skips. JaCoCo reporting was not run in that verification.
+Local development sign-off covers the ingestion and inbox API; production
+deployment and outbox publication remain outside this completed milestone.
