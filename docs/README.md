@@ -15,6 +15,7 @@ repository root in PowerShell.
 | Understand the schema and UUID references | [ER diagram and relationships](architecture/er-diagram.md) |
 | Submit commands or implement a consumer adapter | [Idempotent ingestion](development/idempotent-ingestion.md) |
 | Configure JWT authorization and call HTTP endpoints | [REST API](development/rest-api.md) |
+| Broker Google sign-in and issue API tokens | [Identity broker](development/identity-broker.md) |
 | Run tests and inspect failures | [Testing and verification](development/testing.md) |
 | Initialize, migrate, maintain, or back up PostgreSQL | [Database operations](operations/database.md) |
 | Prepare and verify REST API security deployment | [REST API security runbook](operations/rest-api-security-runbook.md) |
@@ -34,7 +35,7 @@ repository root in PowerShell.
 | Dependencies and JDK version | [build.gradle](../build.gradle) |
 | Application configuration | [application.yaml](../src/main/resources/application.yaml) |
 | Local database configuration | [application-local.yaml](../src/main/resources/application-local.yaml) |
-| HTTP access policy | [SecurityConfiguration.java](../src/main/java/sattya/piseth/crudrestapis/config/SecurityConfiguration.java) |
+| HTTP access policy | [Disabled API policy](../src/main/java/sattya/piseth/crudrestapis/config/SecurityConfiguration.java) and [enabled JWT API policy](../src/main/java/sattya/piseth/crudrestapis/config/ApiSecurityConfiguration.java) |
 | Timestamp formatting | [TimeConfiguration.java](../src/main/java/sattya/piseth/crudrestapis/config/TimeConfiguration.java) |
 | Ingestion transactions | [NotificationIngestionService.java](../src/main/java/sattya/piseth/crudrestapis/notification/application/NotificationIngestionService.java) |
 | Event consumer | [NotificationEventConsumer.java](../src/main/java/sattya/piseth/crudrestapis/notification/application/NotificationEventConsumer.java) |

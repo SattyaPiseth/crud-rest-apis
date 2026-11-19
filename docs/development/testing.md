@@ -55,7 +55,7 @@ Restricted runtime-role integration test:
 .\gradlew.bat test --tests '*RestrictedDatabaseRoleTests'
 ```
 
-All six integration test classes require Docker. They fail rather than silently
+All seven integration test classes require Docker. They fail rather than silently
 skip when a compatible Docker environment is unavailable.
 
 ## Coverage
@@ -72,9 +72,10 @@ skip when a compatible Docker environment is unavailable.
 | DatabaseMigratorTests | Migration entry point and required environment validation |
 | DatabaseMigrationIntegrationTests | Fresh/upgrade migration, failed V3 rollback, restricted non-inheriting migration role, V4 privileges |
 | RestrictedDatabaseRoleTests | Real ingestion/replay as crud_app; metadata/DDL access denied; all forced RLS policy catalog entries, cross-tenant reads/writes/ownership changes, missing/malformed context, pool reuse and concurrent contexts |
+| RestrictedRoleHttpTests | Real HTTP with RS256 tokens and a `crud_app` datasource; forced RLS, cross-tenant denial, replay, auditing, one-connection reuse, configurable role source and independent audience |
 | NotificationApiTests | Signed-JWT authentication, scope/tenant/owner isolation, validation, replay, auditing, pagination, stale versions, safe rollback, live HTTP/1.1 chunked body-limit rejection, and status-only actuator probes |
 | DatabaseUnavailableApiTests | Stops disposable PostgreSQL and verifies a real connection-acquisition failure returns 503 |
-| ApiConfigurationTests | JWK URI allow/deny and startup validation, bearer challenge status, disabled routes, and streamed body-size boundaries with missing/misreported lengths |
+| ApiConfigurationTests | JWK URI allow/deny and startup validation, bearer challenge status, disabled routes, role-source defaults/blank rejection, API-write-only buffering, and streamed body-size boundaries with missing/misreported lengths |
 | ApiErrorsTests | Native/wrapped error classification, permanent SQL failures, correlation IDs |
 | CrudRestApisApplicationTests | Main method delegates to SpringApplication |
 
@@ -176,6 +177,50 @@ and cross-recipient reads/writes, audited creation and updates, idempotency,
 pagination, stale versions, and sanitized errors with atomic rollback.
 The identity provider itself and production network/TLS configuration are not tested.
 
+### Local Keycloak/PostgreSQL lifecycle verification
+
+The local E2E run on 2026-11-19 used a dedicated confidential
+`notification-e2e-producer` service account, not the recipient's Postman client.
+Its Client Credentials token was checked locally for the expected realm issuer,
+`notification-api` audience, fixed tenant and `producer_id` claims, expiry, and
+only the `notifications:write` API role. The secret remains in the ignored
+`.secrets/notification-e2e-producer.env`; never print or share that file or its
+access token.
+
+The persistent local database was at Flyway V2 when first inspected. The API
+was stopped and `scripts/Migrate-LocalDatabase.ps1` applied V3 and V4 using its
+temporary restricted migration login. Afterward, all eight tenant-owned tables
+had forced RLS and tenant policies; `crud_app` saw zero rows without context,
+the authorized tenant's row with its context, and zero rows with a different
+tenant context. A cross-tenant insert was denied and rolled back, and runtime
+access to Flyway history was denied. The actual tenant identifiers are omitted.
+
+Using the migrated database and loopback-only API, producer ingestion returned
+201, same-key/same-payload replay returned 200 with the original ID, changed
+payload returned 409, unknown recipient returned 400, and producer access to
+the inbox returned 403. At that historical post-migration checkpoint, the database had one notification,
+recipient association, outbox event, and ingestion receipt. A subsequent read-only
+inspection on 2026-11-19 found two of each for the approved tenant, with both
+inbox items read and archived at version 2. These counts are observations at
+specific checkpoints, not permanent expected totals.
+Temporary clients also verified 403 for a token with `client_id` but no
+`producer_id`, 403 for inbox-only roles attempting ingestion, and 401 for a
+wrong audience or issuer; temporary clients were removed.
+
+The local database has only one provisioned tenant and no inactive recipients,
+so a live request between two existing tenants and an inactive-recipient request
+were not possible without inventing fixtures. Cross-tenant access and active
+membership rejection are covered by the disposable-database integration tests.
+The recipient's fresh Postman token subsequently returned HTTP 200 for inbox
+list, item detail, read, and archive, and HTTP 403 for attempted notification
+ingestion. A read-only database check confirmed read/archive timestamps, version
+2, and the same-tenant notification association after those requests. That initial report
+did not include a GET list/detail performed after archive; the automated
+`NotificationApiTests.readArchiveVersionAndPaginationContract` test verifies
+that archived items leave the list but remain retrievable by ID. No JWT or
+credential was shared. See the [identity broker guide](identity-broker.md) for
+the current local service notes.
+
 ### REST hardening regressions
 
 The signed-token suite additionally verifies standard bearer challenge parameters,
@@ -214,3 +259,65 @@ This repository has no production deployment workflow or ingress-manifest
 validation. The Jenkins/Sonar pipeline was inspected but cannot be independently
 executed here because its Jenkins shared library and SonarQube installation are
 external. No dependency vulnerability scanner is configured in the Gradle build.
+
+### Signed HTTP with the restricted runtime database role
+
+```powershell
+.\gradlew.bat test --tests '*RestrictedRoleHttpTests'
+```
+
+This suite migrates disposable PostgreSQL as an administrator acting as
+`crud_owner`, then starts the application on a random HTTP port with the datasource
+logged in as `crud_app` (neither superuser nor `BYPASSRLS`). It signs RS256 JWTs
+and serves a local public JWKS; authentication is not mocked. The role-source
+client differs from both its default and the audience. Tests cover selected-client
+roles, ignored other-client roles, additive scopes, and rejection of the wrong audience.
+Signed-token cases also cover malformed nested role claims, mixed-type arrays,
+and realm-only roles: invalid structures grant no authority, valid string roles
+still work, and valid scopes remain usable alongside malformed role claims.
+Permission denials assert HTTP 403 and the `insufficient_scope` bearer challenge.
+
+With a pool size of one, requests alternate tenants through creation, replay,
+listing, detail and read/archive updates. Foreign objects are hidden, foreign
+recipient ingestion fails, and the same idempotency key works independently for
+each tenant. Creation and mutation use distinct JWT subjects. Database assertions
+verify the exact creation identity on notifications, inbox items, outbox events,
+and receipts; read and archive updates preserve that identity and record the
+exact modifying identity. A separate unread-item archive proves that archive
+itself updates auditing, independently of an earlier read. The untouched tenant's
+inbox retains its original audit identity and version. Tests also verify one receipt per tenant,
+transaction-local tenant cleanup and reuse of the same PostgreSQL backend.
+This complements the lower-level privilege and RLS policy tests; it does not
+provision Keycloak or exercise Google federation.
+
+`ApiConfigurationTests` additionally proves that skipped routes do not open the
+body stream or wrap the request, while every supported write route retains the
+256-KiB limit. Existing missing/misreported-length and chunked HTTP tests remain.
+
+### Local sign-off regression checks
+
+`RestrictedRoleHttpTests` performs signed HTTP requests against PostgreSQL as
+`crud_app`: archived items disappear from the default list, remain available to
+the owner through detail, and stale read/archive mutations return 409. A complete
+persisted-row comparison verifies rejected mutations change neither state nor
+audit fields. This is executable automated evidence, not a fresh Postman replay.
+
+The same suite runs the actual Keycloak shell guard in a disposable Linux
+container with substituted CPU-file fixtures and a harmless startup sentinel.
+It covers standard and alternative VBMI spellings, unaffected flags, empty and
+unrecognized metadata, a missing file, and a read failure. No Keycloak process is
+started by these tests. The guard fails closed for unsupported metadata; it is
+not a Java CVE patch or proof of physical-host safety.
+
+Live second-tenant and inactive-recipient checks still require approved fixtures.
+The user subsequently confirmed that the guided Postman checks behaved as
+expected: archived items were absent from the list, detail remained accessible,
+and stale read/archive mutations returned 409 with unchanged state on subsequent
+reads. This is user-reported manual evidence, separate from independently executed
+automated HTTP tests and database inspection. No existing user was deactivated
+and no additional persistent memberships were created for sign-off.
+
+The final automated baseline passed 128 tests across 17 suites with no failures,
+errors, or skips, and JaCoCo reporting completed. Local development sign-off
+covers the ingestion and inbox API; production deployment and outbox publication
+remain outside this completed milestone.

@@ -40,7 +40,7 @@ class DatabaseUnavailableApiTests {
         ((com.zaxxer.hikari.HikariDataSource) dataSource).getHikariPoolMXBean().softEvictConnections();
         mvc.perform(post("/api/v1/notifications").with(jwt().jwt(token -> token
                         .issuer("https://identity.example").subject("producer").claim("tenant_id", UUID.randomUUID().toString())
-                        .claim("client_id", "orders")).authorities(new SimpleGrantedAuthority("SCOPE_notifications:write")))
+                        .claim("producer_id", "orders")).authorities(new SimpleGrantedAuthority("SCOPE_notifications:write")))
                 .header("Idempotency-Key", "outage").contentType("application/json")
                 .content("{\"type\":\"TYPE\",\"category\":\"CATEGORY\",\"title\":\"Title\",\"body\":\"Body\",\"recipientIds\":[\"" + UUID.randomUUID() + "\"]}"))
                 .andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "1"))

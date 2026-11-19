@@ -19,6 +19,12 @@ been installed or that production has been deployed.
   system. JWK retrieval uses the JVM's standard TLS trust/hostname verification,
   rejects redirects, and bypasses ambient JVM proxy settings; permit direct
   outbound HTTPS to the trusted JWK endpoint.
+- If Google is the upstream login provider, configure an identity broker to
+  issue the API tokens. Do not configure this API to accept Google ID tokens
+  directly: they do not carry the required tenant, producer, or API permission
+  claims. The Google OAuth Client ID is not the API audience. Follow the
+  [identity broker guide](../development/identity-broker.md) and verify a
+  broker-issued signed access token before setting `APP_API_ENABLED=true`.
 - Supply runtime datasource credentials for `crud_app`. Keep migration
   credentials separate. The migration login must be `NOINHERIT`, non-superuser,
   non-owner, `NOBYPASSRLS`, and granted `crud_owner` membership for explicit
@@ -140,6 +146,14 @@ checks pass.
 
 ## Current evidence and blockers
 
+- On 2026-11-18, local Google → Keycloak → Postman validation produced an
+  access token with issuer `http://localhost:8180/realms/crud-api`, audience
+  `notification-api`, the approved tenant UUID, `inbox:read`, `inbox:write`,
+  and no `producer_id`. An active PostgreSQL recipient matches the exact tenant,
+  issuer and Keycloak subject. The local Spring Boot API started successfully
+  and returned HTTP 401 with a bearer challenge for an unauthenticated inbox
+  request. This is development evidence only; no production listener or
+  deployment is enabled.
 - Repository tests exercise PostgreSQL 18 migrations and RLS under `crud_app`,
   including migration failure rollback, cross-tenant reads/writes, pool reuse,
   concurrency, and absence of runtime access to Flyway metadata.

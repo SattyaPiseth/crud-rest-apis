@@ -17,11 +17,24 @@ HTTP is denied by default. After database setup and migrations, configure:
 | `APP_API_ISSUER` | Exact trusted JWT issuer, maximum 300 characters |
 | `APP_API_JWK_SET_URI` | Trusted issuer's absolute HTTPS JWK endpoint; HTTP loopback only for local tests |
 | `APP_API_AUDIENCE` | Audience identifying this notification API |
+| `APP_API_ROLE_SOURCE_CLIENT` | Optional Keycloak client ID supplying roles; defaults to `notification-api`; must not be blank |
 
 Then run `./gradlew.bat bootRun --args='--spring.profiles.active=local'`.
 The enabled API fails startup if required settings are absent/blank. Invalid
 `APP_API_ENABLED` values also fail startup rather than falling through to default security. The local
 profile supplies database credentials only; it does not provide an identity provider.
+
+Local development status: the Keycloak `crud-api` realm, Google broker, Postman
+PKCE client, and database recipient identity have been verified in the local
+environment. The local API remains HTTP/loopback-only and is not a production
+deployment. Production requires HTTPS ingress, an HTTPS JWKS endpoint, and the
+remaining TLS, RLS, backup, rate-limit, and runtime-advisory prerequisites.
+
+The local recipient test identity has `tenant_id`, `inbox:read`, `inbox:write`,
+and no `producer_id`. The corresponding database recipient is active and matches
+the Keycloak issuer and subject exactly. Read and mutation authorization must be
+tested separately; the absence of `notifications:write` must continue to reject
+producer ingestion.
 JWK keys are fetched by Spring Security's Nimbus decoder. RS256 is the only
 accepted JWS algorithm. HTTPS is required for all remote JWK endpoints; HTTP is
 allowed only for the exact hosts `127.0.0.1`, `[::1]`, and `localhost`.
@@ -61,14 +74,40 @@ required; `exp` and `nbf` are checked by Spring's default validators and clock s
 | `exp` | Required token expiry |
 | `sub` | Nonblank authenticated subject, at most 180 characters |
 | `tenant_id` | Canonical lowercase UUID of the authorized tenant |
-| `client_id` | Required for ingestion: nonblank registered producer ID, at most 100 characters |
-| `scope` / `scp` | Scopes mapped by Spring Security to `SCOPE_` authorities |
+| `producer_id` | Required for ingestion: nonblank registered producer ID, at most 100 characters |
+| `scope` / `scp` | Space-delimited or string-collection scopes mapped to `SCOPE_` authorities |
+| `resource_access.<role-source-client>.roles` | Optional Keycloak client roles mapped to the same API authorities |
 
-The identity provider must issue tenant and producer claims only after checking
-membership and client registration. These claims must not be user-editable profile
-attributes. A token authorizes exactly one tenant; request bodies and headers do
-not select another tenant or override producer identity. Issuer and client-ID
-assignments must remain stable for retained idempotency keys.
+The trusted identity provider must issue `tenant_id` and `producer_id` only after
+checking membership and producer registration. They must not be user-editable
+profile attributes. `producer_id` is a private application claim; it is
+deliberately distinct from OAuth `client_id`, which identifies the OAuth client
+and is not proof that the caller is a registered notification producer. A token
+authorizes exactly one tenant; request bodies and headers do not select another
+tenant or override producer identity. Issuer and producer assignments must
+remain stable for retained idempotency keys.
+
+The Keycloak broker may grant the API permissions as roles on its
+`APP_API_ROLE_SOURCE_CLIENT` client (default `notification-api`). This setting
+is independent of `APP_API_AUDIENCE`: changing the audience does not change the
+role source. Roles from other clients and realm roles do not grant API authority.
+Existing `scope`/`scp` permissions remain additive. The resource server maps only
+string entries in `resource_access.<role-source-client>.roles` to the corresponding `SCOPE_`
+authorities. Assign roles only through administrator-managed user/group role
+mappings, and ensure the OAuth login client has appropriate role-scope
+mappings. Merely requesting an OAuth scope must not grant an API permission.
+
+For Google sign-in, use an identity broker (for example, Keycloak) to authenticate
+with Google and issue a separate API access token containing this contract.
+Google's OAuth Client ID identifies the upstream Google login client; it is not
+the API audience. Set `APP_API_ISSUER` to the broker realm issuer, use that
+issuer's published HTTPS JWKS URI, and set `APP_API_AUDIENCE` to a distinct
+identifier for this API that the broker places in the access token's `aud`.
+Configure permissions and tenant/producer claims from administrator-controlled
+membership and role data. Never copy a user-editable Google profile field into
+an authorization claim. The active inbox recipient must be provisioned with the
+broker's `iss` and stable `sub`, not Google's upstream subject. See the
+[identity broker guide](identity-broker.md) before enabling the API.
 
 Inbox requests additionally resolve an **active** recipient by `(tenant_id, iss,
 sub)` in the database. Missing/inactive membership returns 403. A foreign or
@@ -207,7 +246,10 @@ Validation errors do not leak which foreign tenant owns a requested recipient.
 No external delivery or end-to-end exactly-once guarantee is implied.
 ### Request size and rate limiting
 
-The application rejects API request bodies larger than **256 KiB** with 413
+The application buffers only `POST /api/v1/notifications` and
+`PUT /api/v1/inbox/{id}/read` or `/archive` request bodies, after authorization.
+Health probes, inbox reads, and unrelated routes pass through without opening
+the body stream in this filter. For those three write routes it rejects bodies larger than **256 KiB** with 413
 after authentication/authorization and before JSON parsing. The filter reads at
 most one byte over the limit, so it applies to chunked bodies and does not trust
 `Content-Length`. The cap is above the maximum supported field sizes and 1000

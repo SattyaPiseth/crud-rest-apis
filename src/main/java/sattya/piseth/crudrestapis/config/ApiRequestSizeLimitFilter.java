@@ -19,6 +19,11 @@ final class ApiRequestSizeLimitFilter extends OncePerRequestFilter {
     static final int MAX_REQUEST_BYTES = 256 * 1024;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return !ApiSecurityConfiguration.isApiWriteRequest(request);
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         var body = request.getInputStream().readNBytes(MAX_REQUEST_BYTES + 1);

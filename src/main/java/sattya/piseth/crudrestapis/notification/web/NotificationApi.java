@@ -32,7 +32,7 @@ public class NotificationApi {
     public ResponseEntity<IngestionResult> create(@AuthenticationPrincipal Jwt jwt,
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max=200) String key,
             @Valid @RequestBody Create request) {
-        var rawProducer = jwt.getClaims().get("client_id");
+        var rawProducer = jwt.getClaims().get("producer_id");
         if (!(rawProducer instanceof String producer) || producer.isBlank() || producer.length() > 100) {
             throw new AccessDeniedException("A registered producer identity is required");
         }

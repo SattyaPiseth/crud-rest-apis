@@ -17,7 +17,7 @@ lives in `notification/persistence`. Lombok constructor injection, immutable Jav
 records, the `DeduplicationStore` interface, and existing encapsulated entities
 preserve the project's Java/OOP conventions.
 
-## 1. Apply V2
+## 1. Apply database migrations
 
 [V2__idempotent_ingestion.sql](../../src/main/resources/db/migration/V2__idempotent_ingestion.sql) adds:
 
@@ -28,6 +28,9 @@ preserve the project's Java/OOP conventions.
 
 Both store a fingerprint, original notification ID, audit metadata, and version.
 Both have a composite FK to the same tenant's notification. V1 is unchanged.
+The current application also requires V3 tenant row-security policies and V4
+migration-history privilege restrictions. Apply all pending migrations; V2 alone
+is not the current database baseline.
 
 Supply the dedicated migration credentials described in the [database guide](../operations/database.md),
 then run:
@@ -57,7 +60,7 @@ application contract, not an authorization mechanism. The REST adapter derives
 this context from validated JWT claims and requires the producer write scope.
 
 - Same key/equivalent command: original ID, `replayed=true`.
-- Same key/different command: `IdempotencyConflictException` (future HTTP 409).
+- Same key/different command: `IdempotencyConflictException`, mapped to HTTP 409 by the REST API.
 - New key: one notification, one inbox row per unique recipient, one outbox event.
 - Missing, inactive or cross-tenant recipients: rejection and full rollback.
 - Expired new notification: rejection and full rollback.
@@ -68,7 +71,7 @@ Fan-out is limited to 1000 input recipient IDs. The outbox payload contains
 notification ID, recipient count, and occurrence time. No external-channel
 delivery jobs are created in this step.
 
-Preferences are persistence-only in stage 1: ingestion does not query
+Preferences remain persistence-only in the current implementation: ingestion does not query
 `NotificationPreference`. A disabled matching `IN_APP` preference still results
 in an inbox item. Filtering, defaults for missing preferences, and behavior when
 all recipients opt out must be defined before preference enforcement is added.

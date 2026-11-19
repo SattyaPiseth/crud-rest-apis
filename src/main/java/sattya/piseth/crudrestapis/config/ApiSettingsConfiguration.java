@@ -22,6 +22,9 @@ public class ApiSettingsConfiguration {
                     var value = environment.getProperty(name);
                     if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required");
                 }
+                if (environment.getProperty("app.api.role-source-client", "notification-api").isBlank()) {
+                    throw new IllegalArgumentException("app.api.role-source-client must not be blank");
+                }
                 JwkSetUriValidator.validate(environment.getProperty("app.api.jwk-set-uri"));
             }
         };

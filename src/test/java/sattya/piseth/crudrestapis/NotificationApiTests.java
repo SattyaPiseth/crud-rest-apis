@@ -135,9 +135,19 @@ class NotificationApiTests {
         var claims = new JWTClaimsSet.Builder().issuer(issuer).subject(user).audience(audience)
                 .issueTime(Date.from(Instant.now())).expirationTime(Date.from(expiry))
                 .claim("tenant_id", tenantId == null ? "invalid" : tenantId.toString())
-                .claim("client_id", "orders").claim("scope", scopes).build();
+                .claim("producer_id", "orders").claim("scope", scopes).build();
         var jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID("test-key").build(), claims);
         jwt.sign(new RSASSASigner(key)); return jwt.serialize();
+    }
+    String tokenWithApiRoles(UUID tenantId, String user, String... roles) throws Exception {
+        var claims = new JWTClaimsSet.Builder().issuer(ISSUER).subject(user).audience("notifications")
+                .issueTime(Date.from(Instant.now())).expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .claim("tenant_id", tenantId.toString())
+                .claim("resource_access", Map.of("notification-api", Map.of("roles", List.of(roles))))
+                .build();
+        var jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID("test-key").build(), claims);
+        jwt.sign(new RSASSASigner(KEY));
+        return jwt.serialize();
     }
     String body(UUID recipientId, String title) {
         return mapper.writeValueAsString(Map.of("type", "TYPE", "category", "ORDERS", "title", title,
@@ -331,9 +341,14 @@ class NotificationApiTests {
         mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + missingProducer)
                 .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON).content(body(recipient, "Title")))
                 .andExpect(status().isForbidden());
+        var oauthClientIdOnly = sign(base.expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .claim("client_id", "orders").build());
+        mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + oauthClientIdOnly)
+                .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON).content(body(recipient, "Title")))
+                .andExpect(status().isForbidden());
         for (var producerId : List.of("", "x".repeat(101))) {
             var invalidProducer = sign(base.expirationTime(Date.from(Instant.now().plusSeconds(300)))
-                    .claim("client_id", producerId).build());
+                    .claim("producer_id", producerId).build());
             mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + invalidProducer)
                     .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
                     .content(body(recipient, "Title"))).andExpect(status().isForbidden());
@@ -355,6 +370,21 @@ class NotificationApiTests {
                 .andExpect(jsonPath("$.notificationId").doesNotExist());
         mvc.perform(delete("/api/v1/inbox/" + id).header("Authorization", "Bearer " + reader())).andExpect(status().isForbidden());
         mvc.perform(get("/actuator/info").header("Authorization", "Bearer " + reader())).andExpect(status().isForbidden());
+    }
+
+    @Test void keycloakApiClientRolesGrantOnlyTheirMatchingAuthorities() throws Exception {
+        var readOnly = tokenWithApiRoles(tenant, subject, "inbox:read");
+        mvc.perform(get("/api/v1/inbox").header("Authorization", "Bearer " + readOnly))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + readOnly)
+                        .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
+                        .content(body(recipient, "Title")))
+                .andExpect(status().isForbidden());
+
+        var writeOnly = tokenWithApiRoles(tenant, subject, "inbox:write");
+        mvc.perform(get("/api/v1/inbox").header("Authorization", "Bearer " + writeOnly))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("WWW-Authenticate", containsString("insufficient_scope")));
     }
 
     @Test void healthProbesArePublicAndDoNotExposeComponentDetails() throws Exception {
@@ -379,6 +409,12 @@ class NotificationApiTests {
             mvc.perform(get("/api/v1/inbox").header("Authorization", "Bearer " + sign(claims)))
                     .andExpect(status().isUnauthorized()).andExpect(header().string("WWW-Authenticate", containsString("invalid_token")));
         }
+        var numericProducer = baseClaims().claim("producer_id", 42).claim("scope", "notifications:write").build();
+        mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + sign(numericProducer))
+                        .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
+                        .content(body(recipient, "Title")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", containsString("invalid_token")));
         mvc.perform(get("/api/v1/inbox").header("Authorization", "Bearer " + sign(baseClaims().claim("scp", List.of("inbox:read")).build())))
                 .andExpect(status().isOk());
         mvc.perform(get("/api/v1/inbox").header("Authorization", "Bearer bad token"))
@@ -414,7 +450,7 @@ class NotificationApiTests {
     @Test void rejectsRequestsLargerThanTheConfiguredApiLimitBeforeJsonParsing() throws Exception {
         var oversized = "{\"type\":\"TYPE\",\"category\":\"CATEGORY\",\"title\":\"Title\",\"body\":\""
                 + "x".repeat(262144) + "\",\"recipientIds\":[\"" + UUID.randomUUID() + "\"]}";
-        mvc.perform(post("/api/v1/notifications").header("Authorization", "Bearer " + producer())
+        mvc.perform(post("/api/v1/notifications").servletPath("/api/v1/notifications").header("Authorization", "Bearer " + producer())
                         .header("Idempotency-Key", "oversized").contentType(MediaType.APPLICATION_JSON).content(oversized))
                 .andExpect(status().isContentTooLarge())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))

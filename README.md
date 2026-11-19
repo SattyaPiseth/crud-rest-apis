@@ -29,7 +29,10 @@ The repository and Gradle project retain the name `crud-rest-apis`.
 The REST API supports notification creation/replay, inbox listing and retrieval,
 and version-checked read/archive updates. HTTP remains denied by default; enable
 the API with a trusted issuer, JWK URL, and audience as described in the
-[REST API guide](docs/development/rest-api.md).
+[REST API guide](docs/development/rest-api.md). Keycloak roles come from the
+configurable `APP_API_ROLE_SOURCE_CLIENT` (default `notification-api`), separately
+from audience validation. The optional local broker service requires manual realm
+setup; see the [identity broker guide](docs/development/identity-broker.md).
 
 ## Current behavior and guarantees
 
@@ -44,7 +47,7 @@ the API with a trusted issuer, JWK URL, and audience as described in the
   Prefer nontransactional transport adapters.
 - New requests reject expired notifications. Accepted request/event receipts
   remain replayable at and after expiry without creating additional inbox items.
-- Preferences are stored but **not enforced in stage 1**. Even a disabled
+- Preferences are stored but **not enforced during ingestion**. Even a disabled
   `IN_APP` preference does not suppress inbox creation for an active, authorized
   tenant recipient. Preference filtering and its all-opted-out policy remain
   future work; email/push delivery is also not implemented.
@@ -89,6 +92,6 @@ src/main/resources/     Application configuration and Flyway migrations
 src/test/java/          Unit and PostgreSQL integration tests
 docker/postgres/init/   Database role and schema initialization
 scripts/                Local setup utilities
-compose.yaml            Persistent local PostgreSQL service
+compose.yaml            Local PostgreSQL and optional Keycloak identity service
 build.gradle            Dependencies, JDK toolchain, and Gradle tasks
 ```

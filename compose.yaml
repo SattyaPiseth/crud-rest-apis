@@ -43,8 +43,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  keycloak:
+    image: quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0
+    restart: "no"
+    profiles: ["identity"]
+    env_file:
+      - ./.secrets/keycloak.env
+    entrypoint: ["/bin/sh", "/opt/keycloak/start-guard.sh"]
+    command: ["start-dev"]
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./docker/keycloak/start-guard.sh:/opt/keycloak/start-guard.sh:ro
+
 volumes:
   postgres_data:
+  keycloak_data:
 
 secrets:
   postgres_password:

@@ -32,6 +32,14 @@ class ApiConfigurationTests {
                 .run(context -> assertThat(context.getStartupFailure()).hasMessageContaining("app.api.issuer is required"));
     }
 
+    @Test void roleSourceDefaultsButRejectsExplicitBlank() {
+        var enabled = settings.withPropertyValues("app.api.enabled=true", "app.api.issuer=https://example.test",
+                "app.api.jwk-set-uri=https://example.test/jwks", "app.api.audience=api");
+        enabled.run(context -> assertThat(context.getStartupFailure()).isNull());
+        enabled.withPropertyValues("app.api.role-source-client= ").run(context ->
+                assertThat(context.getStartupFailure()).hasMessageContaining("app.api.role-source-client must not be blank"));
+    }
+
     @Test void jwtDecoderRejectsBlankOrOversizedConfigurationBeforeNetworkAccess() {
         var configuration = new ApiSecurityConfiguration();
         for (var values : new String[][]{
@@ -203,6 +211,35 @@ class ApiConfigurationTests {
                 .withMessage("Asynchronous request reads are not supported");
     }
 
+    @Test
+    void bufferingSkipsReadsHealthAndUnrelatedWritesWithoutOpeningTheStream() throws Exception {
+        for (var route : new String[][]{{"GET", "/actuator/health"}, {"GET", "/api/v1/inbox"},
+                {"GET", "/api/v1/inbox/123"}, {"POST", "/unrelated"},
+                {"PUT", "/api/v1/inbox/123/other"}}) {
+            var request = new MockHttpServletRequest(route[0], route[1]) {
+                @Override public jakarta.servlet.ServletInputStream getInputStream() {
+                    throw new AssertionError("Skipped requests must not open their body stream");
+                }
+            };
+            request.setServletPath(route[1]);
+            assertThat(filteredRequest(request)).isSameAs(request);
+        }
+    }
+
+    @Test
+    void allApiWriteRoutesEnforceTheBodyLimit() throws Exception {
+        for (var route : new String[][]{{"POST", "/api/v1/notifications"},
+                {"PUT", "/api/v1/inbox/123/read"}, {"PUT", "/api/v1/inbox/123/archive"}}) {
+            var request = new MockHttpServletRequest(route[0], route[1]);
+            request.setServletPath(route[1]);
+            request.setContent(new byte[ApiRequestSizeLimitFilter.MAX_REQUEST_BYTES + 1]);
+            var response = new MockHttpServletResponse();
+            new ApiRequestSizeLimitFilter().doFilter(request, response,
+                    (req, res) -> { throw new AssertionError("Oversized body reached the endpoint"); });
+            assertThat(response.getStatus()).isEqualTo(413);
+        }
+    }
+
     private static HttpServletRequest filteredRequest(MockHttpServletRequest request) throws Exception {
         var wrapped = new java.util.concurrent.atomic.AtomicReference<HttpServletRequest>();
         new ApiRequestSizeLimitFilter().doFilter(request, new MockHttpServletResponse(),
@@ -215,6 +252,7 @@ class ApiConfigurationTests {
             @Override public int getContentLength() { return declaredLength; }
             @Override public long getContentLengthLong() { return declaredLength; }
         };
+        request.setServletPath("/api/v1/notifications");
         request.setContent(body);
         return request;
     }

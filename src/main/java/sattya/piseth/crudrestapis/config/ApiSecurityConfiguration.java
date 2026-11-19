@@ -17,6 +17,10 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CsrfFilter;
@@ -29,6 +33,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
 
 @Configuration(proxyBeanMethods = false)
@@ -81,6 +88,7 @@ public class ApiSecurityConfiguration {
             try {
                 var raw = com.nimbusds.jwt.SignedJWT.parse(token).getPayload().toJSONObject();
                 if (raw == null || !(raw.get("sub") instanceof String) || !(raw.get("tenant_id") instanceof String)
+                        || raw.containsKey("producer_id") && !(raw.get("producer_id") instanceof String)
                         || !validScopes(raw.get("scope")) || !validScopes(raw.get("scp"))) {
                     throw new BadJwtException("Invalid claim types");
                 }
@@ -114,7 +122,8 @@ public class ApiSecurityConfiguration {
     }
 
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http) {
+    SecurityFilterChain apiSecurity(HttpSecurity http,
+            @Value("${app.api.role-source-client:notification-api}") String roleSourceClient) {
         var entry = bearerEntryPoint();
         var denied = bearerDeniedHandler();
         return http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -137,19 +146,40 @@ public class ApiSecurityConfiguration {
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint(entry)
                         .accessDeniedHandler(denied))
-                .oauth2ResourceServer(resource -> resource.jwt(jwt -> {})
+                .oauth2ResourceServer(resource -> resource.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter(roleSourceClient)))
                         .authenticationEntryPoint(entry)
                         .accessDeniedHandler(denied))
                 .addFilterAfter(new ApiRequestSizeLimitFilter(), AuthorizationFilter.class)
                 .build();
     }
 
-    static boolean isBearerApiWriteRequest(HttpServletRequest request) {
+    private static JwtAuthenticationConverter jwtAuthenticationConverter(String roleSourceClient) {
+        var scopeConverter = new JwtGrantedAuthoritiesConverter();
+        var authenticationConverter = new JwtAuthenticationConverter();
+        authenticationConverter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Collection<GrantedAuthority> authorities = new ArrayList<>(scopeConverter.convert(jwt));
+            Object resourceAccessClaim = jwt.getClaims().get("resource_access");
+            if (resourceAccessClaim instanceof Map<?, ?> resources
+                    && resources.get(roleSourceClient) instanceof Map<?, ?> apiClient
+                    && apiClient.get("roles") instanceof Collection<?> roles) {
+                roles.stream().filter(String.class::isInstance).map(String.class::cast)
+                        .map(role -> new SimpleGrantedAuthority("SCOPE_" + role))
+                        .forEach(authorities::add);
+            }
+            return authorities;
+        });
+        return authenticationConverter;
+    }
+
+    static boolean isApiWriteRequest(HttpServletRequest request) {
         String method = request.getMethod();
         String path = request.getServletPath();
-        boolean apiWrite = method.equals("POST") && path.equals("/api/v1/notifications")
+        return method.equals("POST") && path.equals("/api/v1/notifications")
                 || method.equals("PUT") && path.matches("/api/v1/inbox/[^/]+/(read|archive)");
-        if (!apiWrite) return false;
+    }
+
+    static boolean isBearerApiWriteRequest(HttpServletRequest request) {
+        if (!isApiWriteRequest(request)) return false;
 
         String authorization = request.getHeader("Authorization");
         if (authorization == null) return false;
