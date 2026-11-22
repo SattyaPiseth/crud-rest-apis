@@ -45,7 +45,7 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0
-    restart: "no"
+    restart: unless-stopped
     profiles: ["identity"]
     env_file:
       - ./.secrets/keycloak.env
