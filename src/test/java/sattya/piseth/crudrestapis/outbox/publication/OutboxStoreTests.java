@@ -95,6 +95,25 @@ class OutboxStoreTests {
     static void expire(UUID id) { admin.update("UPDATE app.outbox_event SET lease_until=clock_timestamp()-interval '1 second' WHERE id=?",id); }
     static void due(UUID id) { admin.update("UPDATE app.outbox_event SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=?",id); }
 
+    @Test void claimRejectsLimitsOutsideConfiguredBatchSize() {
+        assertThatIllegalArgumentException().isThrownBy(() -> store.claim(tenant,0))
+                .withMessage("Invalid claim limit");
+        assertThatIllegalArgumentException().isThrownBy(() -> store.claim(tenant,settings.batchSize()+1))
+                .withMessage("Invalid claim limit");
+    }
+
+    @Test void finishRejectsRetryDelaysOutsideConfiguredBounds() {
+        var claim=new OutboxStore.Claim(new Publication(UUID.randomUUID(),tenant,UUID.randomUUID(),"event",1,"{}"),
+                UUID.randomUUID(),1);
+        assertThatNullPointerException().isThrownBy(() -> store.finish(claim,null,Duration.ofMillis(10)))
+                .withMessage("outcome");
+        for(var delay:List.of(Duration.ZERO,Duration.ofMillis(-1),settings.maxRetry().plusMillis(1)))
+            assertThatIllegalArgumentException().isThrownBy(() -> store.finish(claim,PublicationOutcome.RETRYABLE,delay))
+                    .withMessage("Retry delay outside configured bounds");
+        assertThatIllegalArgumentException().isThrownBy(() -> store.finish(claim,PublicationOutcome.RETRYABLE,null))
+                .withMessage("Retry delay outside configured bounds");
+    }
+
     @Test void v4UpgradePreservesExistingRecordsAndForcedRls() {
         assertThat(upgradedPending).containsAllEntriesOf(oldPending).containsEntry("state","PENDING");
         assertThat(upgradedPublished).containsAllEntriesOf(oldPublished).containsEntry("state","PUBLISHED");
