@@ -208,6 +208,16 @@ class NotificationApiTests {
                 .andExpect(header().string("WWW-Authenticate", containsString("invalid_token")));
     }
 
+    @Test void ambientSessionCookieCannotAuthenticateStateChangingRequest() throws Exception {
+        mvc.perform(post("/api/v1/notifications")
+                        .cookie(new jakarta.servlet.http.Cookie("JSESSIONID", "ambient-session"))
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                        .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
+                        .content(body(recipient, "Title")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", containsString("Bearer")));
+    }
+
     @Test void acceptsOnlyPinnedRs256AndDoesNotFollowJwkRedirects() throws Exception {
         var unsupported = List.of(
                 signedToken(JWSAlgorithm.RS512, KEY),

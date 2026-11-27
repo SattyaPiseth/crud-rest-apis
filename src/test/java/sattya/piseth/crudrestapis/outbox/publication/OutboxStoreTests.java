@@ -269,6 +269,40 @@ class OutboxStoreTests {
         }
     }
 
+    @Test void restartedWorkerRecoversExpiredClaimAndReportsMetrics() throws Exception {
+        var id=seed(tenant);
+        var config=new OutboxSettings(List.of(tenant),1,1,3,Duration.ofMillis(20),Duration.ofSeconds(5),
+                Duration.ofSeconds(11),Duration.ofSeconds(5),Duration.ofMillis(10),Duration.ofMillis(100),Duration.ofMillis(200));
+        var entered=new CountDownLatch(1);
+        try(var stopped=worker(config,(event,timeout) -> {
+            entered.countDown(); new CountDownLatch(1).await(); return PublicationOutcome.ACKNOWLEDGED;
+        },new io.micrometer.core.instrument.simple.SimpleMeterRegistry())) {
+            stopped.start();
+            assertThat(entered.await(5,TimeUnit.SECONDS)).isTrue();
+            org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                    assertThat(row(id)).containsEntry("state","PROCESSING"));
+            stopped.stop();
+        }
+        assertThat(row(id)).containsEntry("state","PROCESSING").containsEntry("attempt_count",1);
+
+        expire(id);
+        var accepted=new CopyOnWriteArrayList<Publication>();
+        var metrics=new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        try(var restarted=worker(config,(event,timeout) -> {
+            accepted.add(event); return PublicationOutcome.ACKNOWLEDGED;
+        },metrics)) {
+            restarted.start();
+            org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                    assertThat(row(id)).containsEntry("state","PUBLISHED").containsEntry("attempt_count",2));
+            assertThat(accepted).extracting(Publication::eventId).containsExactly(id);
+            assertThat(metrics.get("outbox.attempts").tag("outcome","ACKNOWLEDGED").counter().count()).isEqualTo(1);
+            assertThat(metrics.get("outbox.finalizations").tag("result","APPLIED").counter().count()).isEqualTo(1);
+            org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                    assertThat(metrics.get("outbox.events").tag("state","PUBLISHED").gauge().value()).isEqualTo(1.0));
+            assertThat(metrics.get("outbox.processing").timer().count()).isEqualTo(1);
+        }
+    }
+
     @Test void adapterExceptionsBecomeUnknownWithoutLeakingSensitiveErrors(org.springframework.boot.test.system.CapturedOutput output) {
         var id=seed(tenant); var metrics=new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         var once=settings(List.of(tenant),1,1,1);

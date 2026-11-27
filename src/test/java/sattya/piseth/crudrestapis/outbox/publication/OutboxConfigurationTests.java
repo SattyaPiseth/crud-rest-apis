@@ -31,7 +31,8 @@ class OutboxConfigurationTests {
     }
     @Test void malformedSettingsFailWithoutEchoingInput() {
         for(var property:List.of("tenants=SECRET_BAD_TENANT","concurrency=0","batch-size=33","max-attempts=0",
-                "publication-timeout=0ms","lease-duration=10s","max-retry=1ms","shutdown-timeout=2d","finalization-margin=1s")) {
+                "publication-timeout=0ms","lease-duration=10s","max-retry=1ms","max-retry=86400001ms",
+                "shutdown-timeout=2d","finalization-margin=1s")) {
             var env=new MockEnvironment().withProperty("app.outbox.tenants",UUID.randomUUID().toString());
             var parts=property.split("=",2); env.setProperty("app.outbox."+parts[0],parts[1]);
             assertThatIllegalArgumentException().isThrownBy(() -> OutboxSettings.from(env))
@@ -48,6 +49,22 @@ class OutboxConfigurationTests {
         assertThatIllegalArgumentException().isThrownBy(() -> low.delay(0)).withMessage("Attempt must be positive");
         assertThatIllegalArgumentException().isThrownBy(() -> new RetryBackoff(settings,() -> Double.NaN).delay(1))
                 .withMessage("Jitter sample must be in [0,1)");
+    }
+    @Test void maximumRetryDurationCapsBackoffWithoutOverflow() {
+        var environment = new MockEnvironment().withProperty("app.outbox.tenants", UUID.randomUUID().toString())
+                .withProperty("app.outbox.initial-retry", "1ms").withProperty("app.outbox.max-retry", "24h");
+        var settings = OutboxSettings.from(environment);
+        assertThat(settings.maxRetry()).isEqualTo(Duration.ofDays(1));
+
+        var minimumJitter = new RetryBackoff(settings, () -> 0.0);
+        var maximumJitter = new RetryBackoff(settings, () -> Math.nextDown(1.0));
+        assertThat(minimumJitter.delay(27)).isEqualTo(Duration.ofMillis(33_554_432));
+        assertThat(minimumJitter.delay(28)).isEqualTo(Duration.ofHours(12));
+        assertThat(minimumJitter.delay(Integer.MAX_VALUE)).isEqualTo(Duration.ofHours(12));
+
+        var maximumDelay = maximumJitter.delay(28);
+        assertThat(maximumDelay).isEqualTo(Duration.ofDays(1));
+        assertThat(maximumJitter.delay(Integer.MAX_VALUE)).isEqualTo(maximumDelay);
     }
     @Test void multipleAdaptersAreRejectedEvenWhenOneIsPrimary() {
         context.withPropertyValues("app.outbox.enabled=true","app.outbox.tenants="+UUID.randomUUID())
