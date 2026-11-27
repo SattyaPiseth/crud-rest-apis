@@ -50,6 +50,19 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+tasks.register('outboxOpsProcess', JavaExec) {
+    group = 'verification'
+    description = 'Run the test-only persistent outbox operational harness.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'sattya.piseth.crudrestapis.outbox.publication.PersistentOutboxOpsProcess'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(27)
+    }
+    systemProperty 'outbox.ops.mode', providers.gradleProperty('outboxOpsMode').getOrElse('ack')
+    systemProperty 'outbox.ops.seed', providers.gradleProperty('outboxOpsSeed').getOrElse('false')
+}
+
 tasks.register('migrateDatabase', JavaExec) {
     group = 'database'
     description = 'Run Flyway with separate migration credentials from environment variables.'
