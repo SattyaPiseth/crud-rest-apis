@@ -27,7 +27,7 @@ class OutboxWorkerTests {
 
     private static void awaitIgnoringInterrupts(CountDownLatch latch) {
         while(latch.getCount()>0) {
-            try { latch.await(); } catch(InterruptedException ignored) { /* Simulates stuck I/O. */ }
+            try { latch.await(); } catch(InterruptedException _) { /* Simulates stuck I/O. */ }
         }
     }
     private OutboxWorker worker(OutboxPublisher publisher) {
@@ -44,7 +44,8 @@ class OutboxWorkerTests {
         try(var worker=worker((event,timeout) -> { publishes.incrementAndGet(); return PublicationOutcome.ACKNOWLEDGED; });
             var executor=Executors.newSingleThreadExecutor()) {
             worker.start(); assertThat(entered.await(5,TimeUnit.SECONDS)).isTrue();
-            var stopping=executor.submit(() -> { worker.stop(); });
+            Runnable stopWorker = worker::stop;
+            var stopping=executor.submit(stopWorker);
             try {
                 stopping.get(1,TimeUnit.SECONDS);
                 assertThat(worker.isRunning()).isFalse();

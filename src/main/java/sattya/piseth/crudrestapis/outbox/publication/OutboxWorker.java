@@ -159,11 +159,12 @@ public final class OutboxWorker implements SmartLifecycle, AutoCloseable {
         }
         // Never wait for the poller's JDBC I/O. An in-flight claim may commit, but
         // dispatch rechecks running and leaves that claim for lease recovery.
-        for (var thread : active) {
+        for (var iterator = active.iterator(); iterator.hasNext() && !Thread.currentThread().isInterrupted();) {
+            var thread = iterator.next();
             long remaining = deadline - System.nanoTime();
             if (remaining <= 0) break;
             try { thread.join(java.time.Duration.ofNanos(remaining)); }
-            catch (InterruptedException _) { Thread.currentThread().interrupt(); break; }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); }
         }
         active.forEach(Thread::interrupt);
         for (var pending : transports.shutdownNow()) {

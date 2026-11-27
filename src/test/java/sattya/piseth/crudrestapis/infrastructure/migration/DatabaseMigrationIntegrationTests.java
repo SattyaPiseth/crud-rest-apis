@@ -7,6 +7,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.DriverManager;
 import java.util.HashMap;
 import java.util.Map;
@@ -91,25 +92,7 @@ class DatabaseMigrationIntegrationTests {
                         "processed_event", "flyway_schema_history");
                 assertThat(owners.values()).containsOnly("crud_owner");
             }
-            try (var history = statement.executeQuery(
-                    "SELECT version, success FROM app.flyway_schema_history ORDER BY installed_rank")) {
-                assertThat(history.next()).isTrue();
-                assertThat(history.getString("version")).isEqualTo("1");
-                assertThat(history.getBoolean("success")).isTrue();
-                assertThat(history.next()).isTrue();
-                assertThat(history.getString("version")).isEqualTo("2");
-                assertThat(history.getBoolean("success")).isTrue();
-                assertThat(history.next()).isTrue();
-                assertThat(history.getString("version")).isEqualTo("3");
-                assertThat(history.getBoolean("success")).isTrue();
-                assertThat(history.next()).isTrue();
-                assertThat(history.getString("version")).isEqualTo("4");
-                assertThat(history.getBoolean("success")).isTrue();
-                assertThat(history.next()).isTrue();
-                assertThat(history.getString("version")).isEqualTo("5");
-                assertThat(history.getBoolean("success")).isTrue();
-                assertThat(history.next()).isFalse();
-            }
+            assertSuccessfulMigrationHistory(statement);
         }
 
         try (var migrationConnection = DriverManager.getConnection(
@@ -129,6 +112,27 @@ class DatabaseMigrationIntegrationTests {
             assertThatThrownBy(() -> statement.execute("CREATE TABLE app.migration_role_cannot_ddl (id integer)"))
                     .isInstanceOf(SQLException.class)
                     .extracting(exception -> ((SQLException) exception).getSQLState()).isEqualTo("42501");
+        }
+    }
+    private static void assertSuccessfulMigrationHistory(Statement statement) throws SQLException {
+        try (var history = statement.executeQuery(
+                "SELECT version, success FROM app.flyway_schema_history ORDER BY installed_rank")) {
+            assertThat(history.next()).isTrue();
+            assertThat(history.getString("version")).isEqualTo("1");
+            assertThat(history.getBoolean("success")).isTrue();
+            assertThat(history.next()).isTrue();
+            assertThat(history.getString("version")).isEqualTo("2");
+            assertThat(history.getBoolean("success")).isTrue();
+            assertThat(history.next()).isTrue();
+            assertThat(history.getString("version")).isEqualTo("3");
+            assertThat(history.getBoolean("success")).isTrue();
+            assertThat(history.next()).isTrue();
+            assertThat(history.getString("version")).isEqualTo("4");
+            assertThat(history.getBoolean("success")).isTrue();
+            assertThat(history.next()).isTrue();
+            assertThat(history.getString("version")).isEqualTo("5");
+            assertThat(history.getBoolean("success")).isTrue();
+            assertThat(history.next()).isFalse();
         }
     }
 }

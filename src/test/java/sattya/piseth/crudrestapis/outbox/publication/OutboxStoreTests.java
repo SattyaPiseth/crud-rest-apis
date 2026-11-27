@@ -289,7 +289,7 @@ class OutboxStoreTests {
         try(var worker=worker(config,(event,timeout) -> {
             entered.countDown();
             while(release.getCount()>0) {
-                try { release.await(); } catch(InterruptedException ignored) { /* deliberate broken adapter */ }
+                try { release.await(); } catch(InterruptedException _) { /* deliberate broken adapter */ }
             }
             return PublicationOutcome.ACKNOWLEDGED;
         },metrics)) {
@@ -376,7 +376,8 @@ class OutboxStoreTests {
     @Test void metricsDescribeBacklogAndPublishedEventsAreNotClaimedAgain() {
         var id=seed(tenant);
         assertThat(store.backlog(tenant).states()).containsEntry("PENDING",1L);
-        var claim=store.claim(tenant,1).getFirst(); expire(id);
+        assertThat(store.claim(tenant,1)).hasSize(1);
+        expire(id);
         assertThat(store.backlog(tenant).expiredLeases()).isEqualTo(1);
         assertThat(store.backlog(tenant).oldestSeconds()).isGreaterThanOrEqualTo(0);
         var recovered=store.claim(tenant,1).getFirst();

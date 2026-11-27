@@ -44,7 +44,7 @@ class OutboxEnabledApplicationTests {
         properties.add("spring.datasource.password",() -> "test-app-only");
         properties.add("app.outbox.jdbc-url",POSTGRES::getJdbcUrl);
         properties.add("app.outbox.password",() -> "test-worker-only");
-        properties.add("app.outbox.tenants",() -> TENANT.toString());
+        properties.add("app.outbox.tenants",TENANT::toString);
         properties.add("app.outbox.poll-interval",() -> "20ms");
     }
     @Autowired DataSource apiDataSource;
