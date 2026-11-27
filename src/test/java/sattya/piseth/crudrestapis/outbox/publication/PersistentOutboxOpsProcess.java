@@ -17,6 +17,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.awaitility.Awaitility.await;
 
 /** Test-only process harness for a dedicated localhost PostgreSQL database. */
 public final class PersistentOutboxOpsProcess {
@@ -30,6 +33,8 @@ public final class PersistentOutboxOpsProcess {
     private PersistentOutboxOpsProcess() { }
 
     public static void main(String[] args) throws Exception {
+        if (args.length != 0)
+            throw new IllegalArgumentException("This operational harness accepts configuration through Gradle properties only");
         var mode = System.getProperty("outbox.ops.mode", "ack");
         if (!java.util.List.of("probe", "hold", "retry-then-ack", "ack").contains(mode))
             throw new IllegalArgumentException("Unsupported operational harness mode");
@@ -151,20 +156,22 @@ public final class PersistentOutboxOpsProcess {
     }
 
     private static void verifyRecoveryAndMetrics(MeterRegistry metrics) throws Exception {
-        var deadline = System.nanoTime() + WAIT.toNanos();
-        String previous = "";
-        Map<String, Object> row;
-        do {
-            row = admin.queryForMap("SELECT state,attempt_count,published_at FROM app.outbox_event WHERE id=?", EVENT);
-            var transition = row.get("state") + ":" + row.get("attempt_count");
-            if (!transition.equals(previous)) {
-                System.out.printf("OPS_STATE state=%s attempts=%s published_at=%s%n",
-                        row.get("state"), row.get("attempt_count"), row.get("published_at"));
-                previous = transition;
-            }
-            if ("PUBLISHED".equals(row.get("state"))) break;
-            Thread.sleep(20);
-        } while (System.nanoTime() < deadline);
+        var previous = new AtomicReference<String>();
+        await().alias("outbox event is published")
+                .pollInterval(Duration.ofMillis(20))
+                .atMost(WAIT)
+                .until(() -> {
+                    var currentRow = admin.queryForMap(
+                            "SELECT state,attempt_count,published_at FROM app.outbox_event WHERE id=?", EVENT);
+                    var transition = currentRow.get("state") + ":" + currentRow.get("attempt_count");
+                    if (!transition.equals(previous.getAndSet(transition))) {
+                        System.out.printf("OPS_STATE state=%s attempts=%s published_at=%s%n",
+                                currentRow.get("state"), currentRow.get("attempt_count"), currentRow.get("published_at"));
+                    }
+                    return "PUBLISHED".equals(currentRow.get("state"));
+                });
+        Map<String, Object> row = admin.queryForMap(
+                "SELECT state,attempt_count,published_at FROM app.outbox_event WHERE id=?", EVENT);
         int expectedAttempts = modeIsRetryThenAck() ? 3 : 1;
         if (!"PUBLISHED".equals(row.get("state")) || !Integer.valueOf(expectedAttempts).equals(row.get("attempt_count")))
             throw new IllegalStateException("Event did not recover, retry, and publish within the verification window");
