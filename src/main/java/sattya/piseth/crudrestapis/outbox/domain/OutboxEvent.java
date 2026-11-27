@@ -24,6 +24,8 @@ public class OutboxEvent extends AuditedEntity {
     /** Serialized event; producers must use a serializer, never string concatenation. */
     @Column(nullable = false, updatable = false, length = 20000)
     private String payload;
+    /** Read-only: publication transitions require a fenced worker store operation. */
+    @Column(insertable = false, updatable = false)
     private Instant publishedAt;
 
     public OutboxEvent(UUID tenantId, UUID aggregateId, String eventType, int schemaVersion, String payload) {
@@ -40,10 +42,4 @@ public class OutboxEvent extends AuditedEntity {
         this.payload = payload;
     }
 
-    public void markPublished(Instant when) {
-        Objects.requireNonNull(when, "when");
-        if (publishedAt == null) {
-            publishedAt = when;
-        }
-    }
 }

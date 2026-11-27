@@ -1,0 +1,61 @@
+package sattya.piseth.crudrestapis.outbox.publication;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.mock.env.MockEnvironment;
+import java.time.Duration;
+import java.util.*;
+import static org.assertj.core.api.Assertions.*;
+
+class OutboxConfigurationTests {
+    private final ApplicationContextRunner context=new ApplicationContextRunner()
+            .withUserConfiguration(OutboxConfiguration.class)
+            .withBean(MeterRegistry.class,SimpleMeterRegistry::new);
+
+    @Test void disabledNeedsNeitherDatabaseNorAdapter() {
+        context.run(ctx -> assertThat(ctx).hasNotFailed().doesNotHaveBean(OutboxWorker.class));
+        context.withPropertyValues("app.outbox.enabled=false").run(ctx ->
+                assertThat(ctx).hasNotFailed().doesNotHaveBean(OutboxWorker.class));
+    }
+    @Test void invalidEnablementFailsClosed() {
+        context.withPropertyValues("app.outbox.enabled=yes").run(ctx ->
+                assertThat(ctx.getStartupFailure()).hasMessageContaining("app.outbox.enabled must be true or false"));
+    }
+    @Test void enabledRequiresTrustedTenantsAndExactlyOneAdapter() {
+        context.withPropertyValues("app.outbox.enabled=true").run(ctx ->
+                assertThat(ctx.getStartupFailure()).hasRootCauseMessage("Invalid app.outbox configuration; check tenant list and bounded settings"));
+        context.withPropertyValues("app.outbox.enabled=true","app.outbox.tenants="+UUID.randomUUID()).run(ctx ->
+                assertThat(ctx.getStartupFailure()).hasRootCauseMessage("Outbox requires exactly one explicit publication adapter"));
+    }
+    @Test void malformedSettingsFailWithoutEchoingInput() {
+        for(var property:List.of("tenants=SECRET_BAD_TENANT","concurrency=0","batch-size=33","max-attempts=0",
+                "publication-timeout=0ms","lease-duration=10s","max-retry=1ms","shutdown-timeout=2d","finalization-margin=1s")) {
+            var env=new MockEnvironment().withProperty("app.outbox.tenants",UUID.randomUUID().toString());
+            var parts=property.split("=",2); env.setProperty("app.outbox."+parts[0],parts[1]);
+            assertThatIllegalArgumentException().isThrownBy(() -> OutboxSettings.from(env))
+                    .withMessage("Invalid app.outbox configuration; check tenant list and bounded settings");
+        }
+    }
+    @Test void backoffHasJitterAndOverflowSafeCap() {
+        var settings=OutboxSettings.from(new MockEnvironment().withProperty("app.outbox.tenants",UUID.randomUUID().toString()));
+        var low=new RetryBackoff(settings,() -> 0.0); var high=new RetryBackoff(settings,() -> 0.999999);
+        assertThat(low.delay(1)).isEqualTo(Duration.ofMillis(500));
+        assertThat(high.delay(1)).isEqualTo(Duration.ofMillis(1000));
+        assertThat(low.delay(Integer.MAX_VALUE)).isEqualTo(Duration.ofMillis(150000));
+        assertThat(high.delay(Integer.MAX_VALUE)).isEqualTo(Duration.ofMinutes(5));
+        assertThatIllegalArgumentException().isThrownBy(() -> low.delay(0)).withMessage("Attempt must be positive");
+        assertThatIllegalArgumentException().isThrownBy(() -> new RetryBackoff(settings,() -> Double.NaN).delay(1))
+                .withMessage("Jitter sample must be in [0,1)");
+    }
+    @Test void multipleAdaptersAreRejectedEvenWhenOneIsPrimary() {
+        context.withPropertyValues("app.outbox.enabled=true","app.outbox.tenants="+UUID.randomUUID())
+                .withBean("first",OutboxPublisher.class,() -> (event,timeout) -> PublicationOutcome.ACKNOWLEDGED,
+                        definition -> definition.setPrimary(true))
+                .withBean("second",OutboxPublisher.class,() -> (event,timeout) -> PublicationOutcome.PERMANENT)
+                .run(ctx -> assertThat(ctx.getStartupFailure())
+                        .hasRootCauseMessage("Outbox requires exactly one explicit publication adapter"));
+    }
+
+}

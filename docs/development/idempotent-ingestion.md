@@ -10,7 +10,8 @@ Spring-managed application code; they are not standalone programs or HTTP APIs.
 Implemented: bounded in-app ingestion, transactional outbox creation, and a
 transport-independent consumer. The [REST adapter](rest-api.md) is opt-in; no
 Kafka listener is started.
-Email/push delivery and outbox publication remain later steps.
+Email/push delivery and real broker integration remain later steps. The
+[outbox framework](outbox-publication.md) is implemented with test-only transport adapters.
 
 Application types live in `notification/application`; the PostgreSQL adapter
 lives in `notification/persistence`. Lombok constructor injection, immutable Java
@@ -29,7 +30,7 @@ preserve the project's Java/OOP conventions.
 Both store a fingerprint, original notification ID, audit metadata, and version.
 Both have a composite FK to the same tenant's notification. V1 is unchanged.
 The current application also requires V3 tenant row-security policies and V4
-migration-history privilege restrictions. Apply all pending migrations; V2 alone
+migration-history privilege restrictions, plus V5 outbox lifecycle fields. Apply all pending migrations; V2 alone
 is not the current database baseline.
 
 Supply the dedicated migration credentials described in the [database guide](../operations/database.md),
@@ -166,7 +167,7 @@ replay windows before cleanup. Receipt FKs also block notification deletion
 while references remain; lifecycle cleanup must address both.
 
 Large campaigns need resumable fan-out. Delivery leases/recovery, endpoint
-verification, templates, Kafka adapters, outbox publication, and production load
+verification, templates, Kafka adapters, real broker publication, and production load
 testing remain future steps.
 
 ## Verification

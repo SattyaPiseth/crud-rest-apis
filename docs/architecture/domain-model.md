@@ -38,7 +38,8 @@ inbox/domain/              Recipient-specific read/archive state
 inbox/persistence/         Ownership-scoped repository
 delivery/domain/           Channel, delivery status and guarded transitions
 preference/domain/         Recipient/category/channel opt-in
-outbox/domain/             Event waiting for publication
+outbox/domain/             Immutable outbox envelope and publication timestamp
+outbox/publication/        Restricted JDBC worker, leases, fencing, retries, adapter contract
 infrastructure/migration/ Separate Flyway entry point
 ```
 
@@ -188,7 +189,7 @@ Domain and audit unit tests can run alone:
    tenant claim issuance. The opt-in REST API validates JWTs and resolves inbox
    membership by tenant/issuer/subject. Login/token issuance and SSE remain external
    or future work. See the [REST guide](../development/rest-api.md).
-3. Connect the transactional consumer to Kafka; implement the outbox relay,
+3. Connect the transactional consumer to Kafka; add a real transport adapter to the outbox framework,
    delivery leases/crash recovery, retries and dead-letter handling. Never treat database
    writes plus Kafka sends as one automatically atomic transaction.
 4. Add SSE with authenticated ownership, reconnection and multi-instance routing.
@@ -203,3 +204,6 @@ broker acknowledgement and tolerate duplicate publication.
 [Spring Data JPA auditing](https://docs.spring.io/spring-data/jpa/reference/auditing.html),
 [Spring Boot](https://docs.spring.io/spring-boot/reference/),
 [Testcontainers PostgreSQL](https://java.testcontainers.org/modules/databases/postgres/).
+
+The [outbox framework](../development/outbox-publication.md) uses V5 lifecycle
+columns and a dedicated worker pool. It does not replace the JPA ingestion path.

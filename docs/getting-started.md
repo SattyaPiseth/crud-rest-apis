@@ -55,7 +55,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Migrate-LocalD
 ```
 
 The helper uses the existing local admin secret inside the container to create
-a temporary non-inheriting migration login. It applies V1 through V4 as needed, removes the login,
+a temporary non-inheriting migration login. It applies V1 through V5 as needed, removes the login,
 and restores any existing migration environment variables. It does not change
 the runtime account's privileges or start the web application.
 

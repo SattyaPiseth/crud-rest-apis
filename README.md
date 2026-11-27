@@ -3,8 +3,13 @@
 A Spring Boot case study implementing a tenant-aware notification domain,
 auditing, transactional in-app ingestion, and database-backed deduplication.
 
-Stage 1 provides the persistence and transactional ingestion foundation. Stage 2
-adds an opt-in JWT-authorized REST API for ingestion and recipient inbox operations.
+The existing foundation provides transactional ingestion and an opt-in
+JWT-authorized REST API for ingestion and recipient inbox operations.
+
+**Phase 2: Reliable Asynchronous Event Processing using the Transactional Outbox Pattern.**
+Background workers automatically process committed events once explicitly enabled
+with an adapter and trusted tenant configuration. The framework remains disabled
+by default and is verified with simulated transport acknowledgment.
 
 The repository and Gradle project retain the name `crud-rest-apis`.
 
@@ -20,10 +25,10 @@ The repository and Gradle project retain the name `crud-rest-apis`.
 | Implemented | Remaining |
 |---|---|
 | Six domain entities and two deduplication receipt tables | Identity-provider deployment and token provisioning |
-| Tenant-aware foreign keys and ownership-scoped lookup | Kafka listener and outbox publisher |
+| Tenant-aware foreign keys and ownership-scoped lookup | Kafka listener and real broker publication adapter |
 | Auditing and optimistic locking | Delivery workers, leases, retries, and provider adapters |
 | Idempotent ingestion and transport-independent event consumer | Verified destinations, templates, and delivery-attempt history |
-| Transactional outbox creation | SSE, production load testing, and retention automation |
+| Transactional outbox creation and recoverable publication framework | SSE, production load testing, and retention automation |
 | Preference persistence and enable/disable domain methods | Preference enforcement during ingestion or delivery |
 
 The REST API supports notification creation/replay, inbox listing and retrieval,
@@ -52,7 +57,9 @@ setup; see the [identity broker guide](docs/development/identity-broker.md).
   tenant recipient. Preference filtering and its all-opted-out policy remain
   future work; email/push delivery is also not implemented.
 
-The outbox is persisted, not published. These guarantees do not imply end-to-end
+The outbox worker supports claims, leases, fencing, and bounded retries, but no
+real broker adapter is shipped. See the [outbox guide](docs/development/outbox-publication.md).
+These guarantees do not imply end-to-end
 exactly-once delivery. See the [ingestion guide](docs/development/idempotent-ingestion.md)
 for authorization requirements, retention, transaction boundaries, and retries.
 

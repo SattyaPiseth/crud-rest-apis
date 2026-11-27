@@ -55,3 +55,7 @@ management:
 app:
   api:
     enabled: false
+
+  # No transport adapter is shipped. Enable only after trusted tenant/role provisioning.
+  outbox:
+    enabled: false

@@ -239,3 +239,12 @@ refresh it when patched images are released. For a minor update, back up, review
 release notes, change the pinned minor tag, pull and recreate, then verify.
 For a major update, use `pg_upgrade` or dump/restore into a new volume; never
 simply change the major tag against the existing data directory.
+
+## V5 outbox lifecycle upgrade
+
+V5 extends outbox_event with explicit publication state, claims, leases, attempts,
+and retry timing. It preserves forced RLS and existing records. Apply it using the
+separate migration login; worker credentials are provisioned separately and the
+worker remains disabled. See [outbox operations](outbox-publication.md) for the
+backfill policy, compatibility window, least-privilege grants, and recovery limits.
+No persistent V5 application is implied by disposable integration-test results.

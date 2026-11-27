@@ -16,6 +16,8 @@ repository root in PowerShell.
 | Submit commands or implement a consumer adapter | [Idempotent ingestion](development/idempotent-ingestion.md) |
 | Configure JWT authorization and call HTTP endpoints | [REST API](development/rest-api.md) |
 | Broker Google sign-in and issue API tokens | [Identity broker](development/identity-broker.md) |
+| Understand outbox claims, retries, and simulated publication | [Outbox framework](development/outbox-publication.md) |
+| Provision or operate a future enabled outbox worker | [Outbox operations](operations/outbox-publication.md) |
 | Run tests and inspect failures | [Testing and verification](development/testing.md) |
 | Initialize, migrate, maintain, or back up PostgreSQL | [Database operations](operations/database.md) |
 | Prepare and verify REST API security deployment | [REST API security runbook](operations/rest-api-security-runbook.md) |

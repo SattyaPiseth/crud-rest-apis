@@ -2,7 +2,7 @@
 
 [Documentation index](../README.md) · [Domain model](domain-model.md)
 
-This diagram describes the implemented V1 and V2 schemas, not the future delivery architecture.
+This diagram describes the implemented schema through V5, not the future delivery architecture.
 Java `InboxItem` maps to `notification_recipient`.
 
 ## Entity relationships
@@ -83,6 +83,12 @@ erDiagram
         integer schema_version
         varchar payload
         timestamptz published_at
+        varchar state
+        integer attempt_count
+        timestamptz next_attempt_at
+        uuid claim_token
+        timestamptz lease_until
+        varchar failure_code
     }
 ```
 
@@ -229,3 +235,6 @@ associations are bad. Neither choice changes the schema's normalization level.
 - [Ingestion and deduplication guide](../development/idempotent-ingestion.md)
 - [Hibernate association guidance](https://github.com/hibernate/hibernate-orm/blob/main/documentation/src/main/asciidoc/introduction/Entities.adoc)
 - [Hibernate fetching guidance](https://github.com/hibernate/hibernate-orm/blob/main/documentation/src/main/asciidoc/userguide/chapters/fetching/Fetching.adoc)
+
+V5 outbox lifecycle, indexes, and worker-only mutation rules are described in the
+[outbox guide](../development/outbox-publication.md).

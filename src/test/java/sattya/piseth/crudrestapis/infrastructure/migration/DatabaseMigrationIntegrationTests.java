@@ -105,6 +105,9 @@ class DatabaseMigrationIntegrationTests {
                 assertThat(history.next()).isTrue();
                 assertThat(history.getString("version")).isEqualTo("4");
                 assertThat(history.getBoolean("success")).isTrue();
+                assertThat(history.next()).isTrue();
+                assertThat(history.getString("version")).isEqualTo("5");
+                assertThat(history.getBoolean("success")).isTrue();
                 assertThat(history.next()).isFalse();
             }
         }

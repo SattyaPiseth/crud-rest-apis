@@ -55,7 +55,7 @@ Restricted runtime-role integration test:
 .\gradlew.bat test --tests '*RestrictedDatabaseRoleTests'
 ```
 
-All seven integration test classes require Docker. They fail rather than silently
+PostgreSQL integration test classes require Docker. They fail rather than silently
 skip when a compatible Docker environment is unavailable.
 
 ## Coverage
@@ -64,13 +64,13 @@ skip when a compatible Docker environment is unavailable.
 |---|---|
 | NotificationDomainTests | Tenant consistency, idempotent read/archive methods, delivery transitions, expiry |
 | NotificationCommandTests | Command validation and recipient canonicalization |
-| NotificationLifecycleTests | Preference changes, outbox publication-state transitions, delivery terminal states |
+| NotificationLifecycleTests | Preference changes, immutable outbox envelope, delivery terminal states |
 | RequestFingerprintTests | Fixed v1 command/event hashes, semantic field sensitivity, canonical equivalence, digest-provider failure |
 | SpringAuditorAwareTests | Missing/anonymous actors, JWT identity, scoped background actors |
 | NotificationPersistenceTests | Migrations, auditing, ownership, database FKs, optimistic locking, Phnom Penh timestamps |
 | NotificationIngestionTests | Request/event deduplication, conflicts, tenant/producer scope, atomic rollback, concurrent processing, independent transactions, expiry replay, stored-only preferences |
 | DatabaseMigratorTests | Migration entry point and required environment validation |
-| DatabaseMigrationIntegrationTests | Fresh/upgrade migration, failed V3 rollback, restricted non-inheriting migration role, V4 privileges |
+| DatabaseMigrationIntegrationTests | Fresh/upgrade migration through V5, failed V3 rollback, restricted non-inheriting migration role, V4 privileges |
 | RestrictedDatabaseRoleTests | Real ingestion/replay as crud_app; metadata/DDL access denied; all forced RLS policy catalog entries, cross-tenant reads/writes/ownership changes, missing/malformed context, pool reuse and concurrent contexts |
 | RestrictedRoleHttpTests | Real HTTP with RS256 tokens and a `crud_app` datasource; forced RLS, cross-tenant denial, replay, auditing, one-connection reuse, configurable role source and independent audience |
 | NotificationApiTests | Signed-JWT authentication, scope/tenant/owner isolation, validation, replay, auditing, pagination, stale versions, safe rollback, live HTTP/1.1 chunked body-limit rejection, and status-only actuator probes |
@@ -325,3 +325,21 @@ A full Gradle test run on 2026-11-19 passed 130 tests across 17 suites with no
 failures, errors, or skips. JaCoCo reporting was also run in that verification.
 Local development sign-off covers the ingestion and inbox API; production
 deployment and outbox publication remain outside this completed milestone.
+
+## Outbox framework verification
+
+The outbox milestone adds OutboxStoreTests, OutboxConfigurationTests,
+OutboxWorkerTests, and OutboxEnabledApplicationTests. See [scenario evidence](outbox-verification.md)
+and [outbox operations](../operations/outbox-publication.md). The
+[final seven-concept review](phase2-final-review.md) records the corrected
+shutdown, adapter selection, privilege checks, and additional failure tests.
+
+```powershell
+.\gradlew.bat test --tests '*Outbox*Tests' --console=plain --max-workers=1
+.\gradlew.bat test jacocoTestReport --console=plain --max-workers=1
+```
+
+Historical checkpoints above describe their recorded local database/test state.
+They do not imply V5 is applied to the persistent database or that a real broker
+adapter is operational. Current regression totals belong to the dated outbox
+verification report; all outbox transport outcomes there are simulated.

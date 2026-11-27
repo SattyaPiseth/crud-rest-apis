@@ -100,7 +100,7 @@ status only, not component details.
    ORDER BY c.relname;
    ```
 
-   Expect successful versions 1 through 4 and one `ALL` policy with both tenant
+   Expect successful versions 1 through 5 and one `ALL` policy with both tenant
    predicates on each of the eight tenant-owned tables. Verify runtime grants
    do not include DDL, `TRUNCATE`, `BYPASSRLS`, owner membership, or access to
    Flyway history.
@@ -164,3 +164,7 @@ checks pass.
   actual network 413/429 behavior, trusted proxy behavior, distributed quota
   behavior, capacity thresholds, and backup recovery remain operator-owned
   staging/production validation items.
+
+The current baseline includes V5 outbox lifecycle fields. The outbox worker stays
+disabled and its separate grants are not needed for REST API startup; see
+[outbox operations](outbox-publication.md).

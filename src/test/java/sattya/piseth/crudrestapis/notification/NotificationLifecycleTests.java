@@ -58,16 +58,9 @@ class NotificationLifecycleTests {
     }
 
     @Test
-    void outboxPublicationKeepsTheFirstTimestampAndRejectsNull() {
+    void newOutboxEventRetainsItsImmutableEnvelope() {
         var event = new OutboxEvent(tenant, aggregate, "CREATED", 1, "{}");
         assertThat(event.getPublishedAt()).isNull();
-        assertThatNullPointerException().isThrownBy(() -> event.markPublished(null));
-        assertThat(event.getPublishedAt()).isNull();
-        event.markPublished(now);
-        event.markPublished(now.plusSeconds(60));
-        assertThat(event.getPublishedAt()).isEqualTo(now);
-        assertThatNullPointerException().isThrownBy(() -> event.markPublished(null));
-        assertThat(event.getPublishedAt()).isEqualTo(now);
         assertThat(event.getTenantId()).isEqualTo(tenant);
         assertThat(event.getAggregateId()).isEqualTo(aggregate);
         assertThat(event.getEventType()).isEqualTo("CREATED");
