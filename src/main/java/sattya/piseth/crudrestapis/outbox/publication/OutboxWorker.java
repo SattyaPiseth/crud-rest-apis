@@ -34,6 +34,8 @@ public final class OutboxWorker implements SmartLifecycle, AutoCloseable {
         this.settings = settings;
         this.metrics = metrics;
         this.closeResources = closeResources;
+        // Non-security randomness: only spreads retries within the configured backoff bounds.
+        // It never generates claim tokens or influences tenant authorization or lease ownership.
         backoff = new RetryBackoff(settings, () -> ThreadLocalRandom.current().nextDouble());
         capacity = new Semaphore(settings.concurrency());
         scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("outbox-poll").factory());

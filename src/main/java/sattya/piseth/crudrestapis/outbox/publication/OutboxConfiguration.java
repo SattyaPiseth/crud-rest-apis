@@ -13,10 +13,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 @Configuration(proxyBeanMethods = false)
 public class OutboxConfiguration {
+    private static final String FALSE_VALUE = "false";
+
     @Bean static BeanFactoryPostProcessor validateOutboxEnablement(Environment environment) {
         return factory -> {
-            var value = environment.getProperty("app.outbox.enabled", "false");
-            if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase("false"))
+            var value = environment.getProperty("app.outbox.enabled", FALSE_VALUE);
+            if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase(FALSE_VALUE))
                 throw new IllegalArgumentException("app.outbox.enabled must be true or false");
         };
     }
@@ -41,7 +43,7 @@ public class OutboxConfiguration {
         config.setConnectionTimeout(5000);
         config.setValidationTimeout(1000);
         config.setInitializationFailTimeout(-1);
-        config.addDataSourceProperty("logServerErrorDetail", "false");
+        config.addDataSourceProperty("logServerErrorDetail", FALSE_VALUE);
         config.addDataSourceProperty("connectTimeout", "5");
         config.addDataSourceProperty("socketTimeout", "10");
         config.setConnectionInitSql("SET statement_timeout='5s'");

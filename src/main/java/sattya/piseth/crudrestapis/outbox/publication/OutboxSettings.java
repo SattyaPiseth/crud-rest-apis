@@ -43,7 +43,8 @@ public record OutboxSettings(List<UUID> tenants, int concurrency, int batchSize,
         }
     }
     private static int integer(Binder binder, String name, int fallback) {
-        return binder.bind("app.outbox." + name, Integer.class).orElse(fallback);
+        Integer value = binder.bind("app.outbox." + name, Integer.class).orElse(fallback);
+        return value != null ? value : fallback;
     }
     private static Duration duration(Binder binder, String name, String fallback) {
         return binder.bind("app.outbox." + name, Duration.class)
